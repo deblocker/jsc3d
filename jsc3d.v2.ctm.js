@@ -181,6 +181,8 @@ JSC3D.OpenCTMLoader.prototype.loadFromUrl = function(urlName) {
 					scene.srcUrl = urlName;
 					self.parseCTM(scene, this.responseText);
 					self.onload(scene);
+						self.onload(scene);
+					}
 				}
 			}
 			else {
@@ -194,6 +196,14 @@ JSC3D.OpenCTMLoader.prototype.loadFromUrl = function(urlName) {
 	};
 
 	this.req = xhr;
+	if(this.onprogress) {
+		this.onprogress('Loading CTM file ...', 0);
+		xhr.onprogress = function(event) {
+			self.onprogress('Loading CTM file ...', event.position / event.totalSize);
+		};
+	}
+
+	this.request = xhr;
 	xhr.send();
 };
 
