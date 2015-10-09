@@ -148,26 +148,20 @@ JSC3D.OpenCTMLoader = function(onload, onerror, onprogress, onresource) {
  * Load scene from a given CTM file.
  * @param {String} urlName a string specifying where to fetch the CTM file.
  */
-JSC3D.OpenCTMLoader.prototype.loadFromUrl = function(urlName) {
-	// ignore query substring if any
-	var questionMarkAt = urlName.indexOf('?');
-	if(questionMarkAt >= 0)
-		urlName = urlName.substring(0, questionMarkAt);
-
-	// extract parent path name
-	var lastSlashAt = urlName.lastIndexOf('/');
-	if(lastSlashAt < 0)
-		lastSlashAt = urlName.lastIndexOf('\\');
-	if(lastSlashAt < 0)
-		this.urlPath = '';
-	else
-		this.urlPath = urlName.substring(0, lastSlashAt+1);
-
+ JSC3D.OpenCTMLoader.prototype.loadFromUrl = function(urlName) {
+	var self = this;
+	var isIE = JSC3D.PlatformInfo.browser == 'ie';
+	//TODO: current blob implementation seems do not work correctly on IE10. Repair it or turn to an arraybuffer implementation.
+	var isIE10Compatible = false;//(isIE && parseInt(JSC3D.PlatformInfo.version) >= 10);
 	var xhr = new XMLHttpRequest;
 	xhr.open('GET', encodeURI(urlName), true);
-	xhr.overrideMimeType('text/plain; charset=x-user-defined');
+	if(isIE10Compatible)
+		xhr.responseType = 'blob';	// use blob method to deal with CTM files for IE >= 10
+	else if(isIE)
+		xhr.setRequestHeader("Accept-Charset", "x-user-defined");
+	else
+		xhr.overrideMimeType('text\/plain; charset=x-user-defined');
 
-	var self = this;
 	xhr.onreadystatechange = function() {
 		if(this.readyState == 4) {
 			if(this.status == 200 || this.status == 0) {
@@ -176,11 +170,33 @@ JSC3D.OpenCTMLoader.prototype.loadFromUrl = function(urlName) {
 				if(self.onload) {
 					if(self.onprogress)
 						self.onprogress('Loading CTM file ...', 1);
-					// parse the loaded stuff into a scene
-					var scene = new JSC3D.Scene;
-					scene.srcUrl = urlName;
-					self.parseCTM(scene, this.responseText);
-					self.onload(scene);
+					if(isIE10Compatible) {
+						// asynchronously decode blob to binary string
+						var blobReader = new FileReader;
+						blobReader.onload = function(event) {
+							var scene = new JSC3D.Scene;
+							scene.srcUrl = urlName;
+							self.parseCTM(scene, event.target.result);
+							self.onload(scene);
+						};
+						blobReader.readAsText(this.response, 'x-user-defined');
+					}
+					else if(isIE) {
+						// decode data from XHR's responseBody into a binary string, since it cannot be accessed directly from javascript.
+						// this would work on IE6~IE9
+						var scene = new JSC3D.Scene;
+						scene.srcUrl = urlName;
+						try {
+							self.parseCTM(scene, JSC3D.Util.ieXHRResponseBodyToString(this.responseBody));
+						} catch(e) {}
+						self.onload(scene);
+					}
+					else {
+						var scene = new JSC3D.Scene;
+						scene.srcUrl = urlName;
+						self.parseCTM(scene, this.responseText);
+						self.onload(scene);
+					}
 				}
 			}
 			else {
@@ -189,11 +205,18 @@ JSC3D.OpenCTMLoader.prototype.loadFromUrl = function(urlName) {
 				if(self.onerror)
 					self.onerror('Failed to load CTM file "' + urlName + '".');
 			}
-			self.req = null;
+			self.request = null;
 		}
 	};
 
-	this.req = xhr;
+	if(this.onprogress) {
+		this.onprogress('Loading CTM file ...', 0);
+		xhr.onprogress = function(event) {
+			self.onprogress('Loading CTM file ...', event.position / event.totalSize);
+		};
+	}
+
+	this.request = xhr;
 	xhr.send();
 };
 
