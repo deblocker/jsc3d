@@ -54,6 +54,8 @@ JSC3D.WebGLRenderBackend = function(canvas, releaseLocalBuffers) {
 	this.definition = 'standard';
 	this.bkgColors = [0, 0];
 	this.bkgTexture = null;
+	this.frameWidth = this.canvas.width || 0; /* Viewer Resize */
+	this.frameHeight = this.canvas.height || 0; /* Viewer Resize */
 	this.backFB = null;
 	this.pickingFB = null;
 	this.pickingResult = new Uint8Array(4);
@@ -326,6 +328,7 @@ JSC3D.WebGLRenderBackend.prototype.beginFrame = function(definition, hasBackgrou
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 	}
 
+	var oldFrameWidth = this.frameWidth, oldFrameHeight = this.frameHeight; /* Viewer Resize */
 	var frameWidth  = this.canvas.width;
 	var frameHeight = this.canvas.height;
 	switch(definition) {
@@ -342,11 +345,20 @@ JSC3D.WebGLRenderBackend.prototype.beginFrame = function(definition, hasBackgrou
 		break;
 	}
 
+	/* Viewer Resize +++ */
+	if (frameWidth != oldFrameWidth || frameHeight != oldFrameHeight) {
+		if(this.backFB) {
+			destroyFB(gl, this.backFB);
+			this.backFB = null;
+		}
+	}
+	/* Viewer Resize --- */
+	
 	/*
 	 * For definitions other than 'standard', drawings will be generated in the back frame-buffer
 	 * and then resampled to be applied on canvas.
 	 */
-	if(frameWidth != this.canvas.width) {
+	if(definition != 'standard') { /* Viewer Resize */
 		if(!this.backFB) {
 			// create the back frame-buffer and bind it as render target
 			this.backFB = gl.createFramebuffer();
@@ -369,7 +381,10 @@ JSC3D.WebGLRenderBackend.prototype.beginFrame = function(definition, hasBackgrou
 	}
 
 	this.definition = definition;
-
+	
+	this.frameWidth = frameWidth; /* Viewer Resize */
+	this.frameHeight = frameHeight; /* Viewer Resize */
+	
 	gl.viewport(0, 0, frameWidth, frameHeight);
 
 	/*

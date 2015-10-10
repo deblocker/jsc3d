@@ -96,8 +96,8 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.colorBuffer = null;
 	this.zBuffer = null;
 	this.selectionBuffer = null;
-	this.frameWidth = canvas.width;
-	this.frameHeight = canvas.height;
+	this.frameWidth = null; /* Viewer Resize */
+	this.frameHeight = null; /* Viewer Resize */
 	this.scene = null;
 	this.defaultMaterial = null;
 	this.sphereMap = null;
@@ -227,6 +227,12 @@ JSC3D.Viewer.prototype.init = function() {
 	this.useWebGL = this.params['Renderer'].toLowerCase() == 'webgl';
 	this.releaseLocalBuffers = this.params['LocalBuffers'].toLowerCase() == 'release';
 
+	/* Viewer Resize +++ */
+	var cb = this.getInnerSize();
+	this.canvas.width = cb[0];
+	this.canvas.height = cb[1];
+	/* Viewer Resize --- */
+	
 	// Create WebGL render back-end if it is assigned to.
 	if(this.useWebGL && JSC3D.PlatformInfo.supportWebGL && JSC3D.WebGLRenderBackend) {
 		try {
@@ -326,6 +332,16 @@ JSC3D.Viewer.prototype.update = function(repaintOnly) {
 	else
 		this.needUpdate = true;
 };
+
+/**
+	Viewer Resize
+ */
+JSC3D.Viewer.prototype.getInnerSize = function() {
+	var style = window.getComputedStyle(this.canvas);
+	var padLR = parseInt(style.paddingLeft) + parseInt(style.paddingRight);
+	var padTB = parseInt(style.paddingTop) + parseInt(style.paddingBottom);
+	return [this.canvas.clientWidth - padLR, this.canvas.clientHeight - padTB];
+}
 
 /**
 	Rotate the scene with given angles around Cardinal axes.
@@ -992,6 +1008,62 @@ JSC3D.Viewer.prototype.gestureHandler = function(e) {
 
 	e.gesture.preventDefault();
 	e.gesture.stopPropagation();
+};
+
+/**
+	Viewer Resize.
+ */
+JSC3D.Viewer.prototype.resize = function() {
+	var cb = this.getInnerSize();
+	var w = cb[0];
+	var h = cb[1];
+	var oldFrameWidth = this.frameWidth, oldFrameHeight = this.frameHeight;
+	
+	var frameWidth = 0, frameHeight = 0;
+	switch (this.definition) {
+		case 'low':
+			frameWidth = ~~((w + 1) / 2);
+			frameHeight = ~~((h + 1) / 2);
+			break;
+		case 'high':
+			frameWidth = w * 2;
+			frameHeight = h * 2;
+			break;
+		case 'standard':
+		default:
+			frameWidth = w;
+			frameHeight = h;
+			break;
+	}
+	
+	if (frameWidth != oldFrameWidth || frameHeight != oldFrameHeight) {
+		this.canvas.width = w;
+		this.canvas.height = h;
+		var ratio = frameWidth / oldFrameWidth;
+		this.zoomFactor *= ratio;
+		this.panning[0] *= ratio;
+		this.panning[1] *= ratio;
+		if (this.webglBackend) {
+			this.webglBackend.canvas = this.canvas;
+			this.frameWidth = frameWidth;
+			this.frameHeight = frameHeight;		
+		} else {
+			this.canvasData = this.ctx2d.getImageData(0, 0, this.canvas.width, this.canvas.height);
+			this.frameWidth = frameWidth;
+			this.frameHeight = frameHeight;
+			var newSize = frameWidth * frameHeight;
+			if(this.colorBuffer.length < newSize)
+				this.colorBuffer = new Array(newSize);
+			if(this.zBuffer.length < newSize)
+				this.zBuffer = new Array(newSize);
+			if(this.selectionBuffer.length < newSize)
+				this.selectionBuffer = new Array(newSize);
+			if(this.bkgColorBuffer.length < newSize)
+				this.bkgColorBuffer = new Array(newSize);
+		}
+		this.generateBackground();
+		this.needUpdate = true;
+	}
 };
 
 /**
