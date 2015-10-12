@@ -65,6 +65,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 			SphereMapUrl:		parameters.SphereMapUrl || '', 
 			ProgressBar:		parameters.ProgressBar || 'on', 
 			Renderer:			parameters.Renderer || '', 
+			AutoUpdate:			parameters.AutoUpdate || 'off',  /* FPS */
 			LocalBuffers:		parameters.LocalBuffers || 'retain'
 		};
 	else
@@ -86,6 +87,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 			SphereMapUrl: '', 
 			ProgressBar: 'on', 
 			Renderer: '', 
+			AutoUpdate: 'off', /* FPS */
 			LocalBuffers: 'retain'
 		};
 
@@ -111,6 +113,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.initRotZ = 0;
 	this.zoomFactor = 1;
 	this.panning = [0, 0];
+	this.fps = 0; /* FPS */
 	this.rotMatrix = new JSC3D.Matrix3x4;
 	this.transformMatrix = new JSC3D.Matrix3x4;
 	this.sceneUrl = '';
@@ -126,6 +129,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.isMipMappingOn = false;
 	this.creaseAngle = -180;
 	this.sphereMapUrl = '';
+	this.isAutoUpdateOn = false;
 	this.showProgressBar = true;
 	this.buttonStates = {};
 	this.keyStates = {};
@@ -148,6 +152,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.onmouseclick = null;
 	this.beforeupdate = null;
 	this.afterupdate = null;
+	this.ontick = null; /* FPS */
 	this.mouseUsage = 'default';
 	this.isDefaultInputHandlerEnabled = true;
 	this.progressFrame = null;
@@ -225,8 +230,14 @@ JSC3D.Viewer.prototype.init = function() {
 	this.sphereMapUrl = this.params['SphereMapUrl'];
 	this.showProgressBar = this.params['ProgressBar'].toLowerCase() == 'on';
 	this.useWebGL = this.params['Renderer'].toLowerCase() == 'webgl';
+	this.isAutoUpdateOn = this.params['AutoUpdate'].toLowerCase() == 'on'; /* FPS */
 	this.releaseLocalBuffers = this.params['LocalBuffers'].toLowerCase() == 'release';
 
+	/* FPS +++ */
+	if (this.definition == 'default')
+		this.definition = JSC3D.PlatformInfo.profile;
+	/* FPS --- */
+	
 	/* Viewer Resize +++ */
 	var cb = this.getInnerSize();
 	this.canvas.width = cb[0];
@@ -304,10 +315,31 @@ JSC3D.Viewer.prototype.init = function() {
 
 	// wake up update routine per 30 milliseconds
 	var self = this;
+	
+	/* FPS +++ */
+	var frameUpdateTime = (new Date)*1;
 	(function tick() {
+		/* thanks: avih */
+		var interval = 1000 / 30;
+		var now = (window.performance && window.performance.now) ? window.performance.now() : Date.now();
+		// setTimeout can return early, make sure to target the next frame.
+		if (self.frameTargetTime && now < self.frameTargetTime)
+			now = self.frameTargetTime + 0.01; // Floating point errors may result in just too early.
+		var delay = interval - now % interval;
+		self.frameTargetTime = now + delay;
+		var fps = 1000 / (now - frameUpdateTime);
+		if (now != frameUpdateTime){
+			self.fps += (fps - self.fps) / 30; /* low-pass filter */
+			frameUpdateTime = now;
+		}
+		if (self.isAutoUpdateOn) 
+			self.needUpdate = true;
 		self.doUpdate();
-		setTimeout(tick, 30);
+		if(self.ontick != null && (typeof self.ontick) == 'function')
+			self.ontick();
+		setTimeout(tick, delay);
 	}) ();
+	/* FPS --- */
 
 	// load background image if any
 	this.setBackgroudImageFromUrl(this.bkgImageUrl);
@@ -3499,6 +3531,7 @@ JSC3D.Viewer.prototype.initRotY = 0;
 JSC3D.Viewer.prototype.initRotZ = 0;
 JSC3D.Viewer.prototype.zoomFactor = 1;
 JSC3D.Viewer.prototype.panning = [0, 0];
+JSC3D.Viewer.prototype.fps = 0; /* FPS */
 JSC3D.Viewer.prototype.rotMatrix = null;
 JSC3D.Viewer.prototype.transformMatrix = null;
 JSC3D.Viewer.prototype.sceneUrl = '';
@@ -3512,6 +3545,7 @@ JSC3D.Viewer.prototype.isMipMappingOn = false;
 JSC3D.Viewer.prototype.creaseAngle = -180;
 JSC3D.Viewer.prototype.sphereMapUrl = '';
 JSC3D.Viewer.prototype.showProgressBar = true;
+JSC3D.Viewer.prototype.isAutoUpdateOn = false;
 JSC3D.Viewer.prototype.buttonStates = null;
 JSC3D.Viewer.prototype.keyStates = null;
 JSC3D.Viewer.prototype.mouseX = 0;
@@ -3566,7 +3600,7 @@ JSC3D.Viewer.prototype.beforeupdate = null;
 JSC3D.Viewer.prototype.afterupdate = null;
 JSC3D.Viewer.prototype.mouseUsage = 'default';
 JSC3D.Viewer.prototype.isDefaultInputHandlerEnabled = false;
-
+JSC3D.Viewer.prototype.ontick = null; /* FPS */
 
 /**
 	@class PickInfo
@@ -4814,8 +4848,9 @@ JSC3D.Util = {
 
 JSC3D.PlatformInfo = (function() {
 	var info = {
-		browser:			'other', 
-		version:			'n/a', 
+		browser:			'other',
+		version:			'n/a',
+		profile:			'default', /* FPS */
 		isTouchDevice:		(document.createTouch != undefined), 		// detect if it is running on touch device
 		supportTypedArrays:	(window.Uint32Array != undefined),			// see if Typed Arrays are supported 
 		supportWebGL:		(window.WebGLRenderingContext != undefined)	// see if WebGL context is supported
@@ -4844,6 +4879,24 @@ JSC3D.PlatformInfo = (function() {
 		}
 	}
 
+	/* FPS +++ */
+	var ops = 0;
+	var start = new Date();
+	var interval = 200;
+	while(new Date().getTime() - start < interval){
+		/* shameless trivial */
+		var c = new Array();
+		for(var deg=-180; deg<180; deg++) {
+			c.push(Math.cos(deg * Math.PI/180));
+		}
+		c = null;
+		ops ++;
+	}
+	ops /= interval;
+	if (ops < 3) info.profile = 'low';
+	if (ops > 30) info.profile = 'high';
+	/* FPS --- */
+	
 	return info;
 }) ();
 
