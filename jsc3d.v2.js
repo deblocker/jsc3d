@@ -101,6 +101,8 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.frameWidth = null; /* Viewer Resize */
 	this.frameHeight = null; /* Viewer Resize */
 	this.scene = null;
+	this.textures = []; /* Textures preload & materials collection */
+	this.materials = []; /* Textures preload & materials collection */
 	this.defaultMaterial = null;
 	this.sphereMap = null;
 	this.isLoaded = false;
@@ -299,7 +301,7 @@ JSC3D.Viewer.prototype.init = function() {
 	this.scene = null;
 
 	// create a default material to render meshes that don't have one
-	this.defaultMaterial = new JSC3D.Material('default', undefined, this.modelColor, 0, true);
+	this.defaultMaterial = new JSC3D.Material("default", undefined, this.modelColor, 0, true, false); /* EnvironmentCast of Material */
 
 	// allocate memory storage for frame buffers
 	if(!this.webglBackend) {
@@ -513,6 +515,49 @@ JSC3D.Viewer.prototype.setSphereMapFromUrl = function(sphereMapUrl) {
 	};
 
 	newMap.createFromUrl(this.sphereMapUrl);
+};
+
+/**
+	Textures preload & materials collection
+ */
+JSC3D.Viewer.prototype.addTexture = function(textureUrlName) {
+	var texture = new JSC3D.Texture;
+	texture.createFromUrl(textureUrlName);
+	var fileName = textureUrlName.replace(/^.*(\\|\/|\:)/, '');
+	texture.name = fileName.substr(0,fileName.lastIndexOf(".")) || fileName + "";
+	this.textures.push(texture);
+};
+
+/**
+	Textures preload & materials collection
+ */
+JSC3D.Viewer.prototype.getTexture = function(textureName) {
+	for(var i=0, l=this.textures.length; i<l; i++) {
+		var texture = this.textures[i];
+		if(texture.name == textureName)
+			return texture;
+	}
+	return null;
+};
+
+/**
+	Textures preload & materials collection
+ */
+JSC3D.Viewer.prototype.addMaterial = function(name, ambientColor, diffuseColor, transparency, simulateSpecular, environmentCast) { /* EnvironmentCast of Material */
+	var material = new JSC3D.Material(name, ambientColor, diffuseColor, transparency, simulateSpecular, environmentCast); /* EnvironmentCast of Material */
+	this.materials.push(material);
+};
+
+/**
+	Textures preload & materials collection
+ */
+JSC3D.Viewer.prototype.getMaterial = function(materialName) {
+	for(var i=0, l=this.materials.length; i<l; i++) {
+		var material = this.materials[i];
+		if(material.name == materialName)
+			return material;
+	}
+	return null;
 };
 
 /**
@@ -1633,7 +1678,8 @@ JSC3D.Viewer.prototype.render = function() {
 						this.renderSolidFlat(mesh);
 					break;
 				case 'texturesmooth':
-					if(mesh.isEnvironmentCast && this.sphereMap != null && this.sphereMap.hasData())
+					var environmentCast = (mesh.material) ? mesh.material.isEnvironmentCast : mesh.isEnvironmentCast; /* EnvironmentCast of Material */
+					if(environmentCast && this.sphereMap != null && this.sphereMap.hasData())
 						this.renderSolidSphereMapped(mesh);
 					else if(mesh.hasTexture())
 						this.renderTextureSmooth(mesh);
@@ -3520,6 +3566,8 @@ JSC3D.Viewer.prototype.selectionBuffer = null;
 JSC3D.Viewer.prototype.frameWidth = 0;
 JSC3D.Viewer.prototype.frameHeight = 0;
 JSC3D.Viewer.prototype.scene = null;
+JSC3D.Viewer.prototype.textures = []; /* Textures preload & materials collection */
+JSC3D.Viewer.prototype.materials = []; /* Textures preload & materials collection */
 JSC3D.Viewer.prototype.defaultMaterial = null;
 JSC3D.Viewer.prototype.sphereMap = null;
 JSC3D.Viewer.prototype.isLoaded = false;
@@ -4199,12 +4247,13 @@ JSC3D.Mesh.prototype.transformedVertexNormalBuffer = null;
 
 	This class implements material which describes the feel and look of a mesh.
  */
-JSC3D.Material = function(name, ambientColor, diffuseColor, transparency, simulateSpecular) {
+JSC3D.Material = function(name, ambientColor, diffuseColor, transparency, simulateSpecular, environmentCast) {
 	this.name = name || '';
 	this.diffuseColor = diffuseColor || 0x7f7f7f;
 	// default ambient color will be of 1/8 the intensity of the diffuse color
 	this.ambientColor = (typeof ambientColor) == 'number' ? ambientColor : (((this.diffuseColor & 0xff0000) >> 3) & 0xff0000 | ((this.diffuseColor & 0xff00) >> 3) & 0xff00 | ((this.diffuseColor & 0xff) >> 3));
 	this.transparency = transparency || 0;
+	this.isEnvironmentCast = environmentCast || false; /* EnvironmentCast of Material */
 	this.simulateSpecular = simulateSpecular || false;
 	this.palette = null;
 };
@@ -4289,6 +4338,7 @@ JSC3D.Material.prototype.name = '';
 JSC3D.Material.prototype.ambientColor = 0;
 JSC3D.Material.prototype.diffuseColor = 0x7f7f7f;
 JSC3D.Material.prototype.transparency = 0;
+JSC3D.Material.prototype.isEnvironmentCast = false; /* EnvironmentCast of Material */
 JSC3D.Material.prototype.simulateSpecular = false;
 JSC3D.Material.prototype.palette = null;
 

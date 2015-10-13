@@ -611,7 +611,8 @@ JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transf
 			isBlendEnabled = isTransparent;
 		}
 
-		var isSphereMapped = mesh.isEnvironmentCast && (sphereMap != null);
+		var environmentCast = (mesh.material) ? mesh.material.isEnvironmentCast : mesh.isEnvironmentCast; /* EnvironmentCast of Material */
+		var isSphereMapped = environmentCast && (sphereMap != null);
 
 		// resolve current render mode and then choose a right program
 		var rmode = mesh.renderMode || renderMode;
