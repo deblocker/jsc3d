@@ -277,7 +277,7 @@ JSC3D.ObjLoader.prototype.parseObj = function(scene, data) {
 					curMtllibName = '';
 				break;
 			case 'usemtl':
-				if(tokens.length > 1 && tokens[1] != "") {  /* Textures preload & materials collection */
+				if(tokens.length > 1 && tokens[1] != '') {  /* Textures preload & materials collection */
 					curMtlName = tokens[1];
 					var meshid = curMtllibName + '-' + curMtlName;
 					var mesh = meshes[meshid];

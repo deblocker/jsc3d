@@ -52,6 +52,8 @@ JSC3D.Viewer = function(canvas, parameters) {
 			InitRotationX:		parameters.InitRotationX || 0, 
 			InitRotationY:		parameters.InitRotationY || 0, 
 			InitRotationZ:		parameters.InitRotationZ || 0, 
+			SceneRotation:      parameters.SceneRotation ||  'off', /* Scene Rotation */
+			InitSceneRotation:	parameters.InitSceneRotation || 0,  /* Scene Rotation */
 			ModelColor:			parameters.ModelColor || '#caa618', 
 			BackgroundColor1:	parameters.BackgroundColor1 || '#ffffff', 
 			BackgroundColor2:	parameters.BackgroundColor2 || '#383840', 
@@ -74,6 +76,8 @@ JSC3D.Viewer = function(canvas, parameters) {
 			InitRotationX: 0, 
 			InitRotationY: 0, 
 			InitRotationZ: 0, 
+			InitSceneRotation: 0, /* Scene Rotation */
+			SceneRotation: 'off', /* Scene Rotation */
 			ModelColor: '#caa618', 
 			BackgroundColor1: '#ffffff', 
 			BackgroundColor2: '#383840', 
@@ -115,6 +119,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.initRotZ = 0;
 	this.zoomFactor = 1;
 	this.panning = [0, 0];
+	this.rotation = [0, 0, 0]; /* Scene Rotation */
 	this.fps = 0; /* FPS */
 	this.rotMatrix = new JSC3D.Matrix3x4;
 	this.transformMatrix = new JSC3D.Matrix3x4;
@@ -234,7 +239,9 @@ JSC3D.Viewer.prototype.init = function() {
 	this.useWebGL = this.params['Renderer'].toLowerCase() == 'webgl';
 	this.isAutoUpdateOn = this.params['AutoUpdate'].toLowerCase() == 'on'; /* FPS */
 	this.releaseLocalBuffers = this.params['LocalBuffers'].toLowerCase() == 'release';
-
+	this.isSceneRotationEnabled = this.params['SceneRotation'].toLowerCase() == 'on'; /* Scene Rotation */
+	this.initSceneRotation = parseFloat(this.params['InitSceneRotation']); /* Scene Rotation */
+	
 	/* FPS +++ */
 	if (this.definition == 'default')
 		this.definition = JSC3D.PlatformInfo.profile;
@@ -292,6 +299,7 @@ JSC3D.Viewer.prototype.init = function() {
 	// initialize states
 	this.zoomFactor = 1;
 	this.panning = [0, 0];
+	this.rotation = [0, 0, 0]; /* Scene Rotation */
 	this.rotMatrix.identity();
 	this.transformMatrix.identity();
 	this.isLoaded = false;
@@ -301,7 +309,7 @@ JSC3D.Viewer.prototype.init = function() {
 	this.scene = null;
 
 	// create a default material to render meshes that don't have one
-	this.defaultMaterial = new JSC3D.Material("default", undefined, this.modelColor, 0, true, false); /* EnvironmentCast of Material */
+	this.defaultMaterial = new JSC3D.Material('default', undefined, this.modelColor, 0, true, false); /* EnvironmentCast of Material */
 
 	// allocate memory storage for frame buffers
 	if(!this.webglBackend) {
@@ -384,10 +392,74 @@ JSC3D.Viewer.prototype.getInnerSize = function() {
 	@param {Number} rotZ rotation angle around Z-axis in degrees.
  */
 JSC3D.Viewer.prototype.rotate = function(rotX, rotY, rotZ) {
-	this.rotMatrix.rotateAboutXAxis(rotX);
-	this.rotMatrix.rotateAboutYAxis(rotY);
-	this.rotMatrix.rotateAboutZAxis(rotZ);
+	this.rotateAboutXAxis(rotX); /* Scene Rotation */
+	this.rotateAboutYAxis(rotY); /* Scene Rotation */
+	this.rotateAboutZAxis(rotZ); /* Scene Rotation */
 };
+
+JSC3D.Viewer.prototype.calcRotation = function() { /* Scene Rotation */
+	var m = this.rotMatrix;
+    var angleX = 0;
+    var angleY = 0;
+    var angleZ = 0;
+	var radians = 180 / Math.PI;
+
+	angleY = Math.asin(m.m01);
+	var c = Math.cos(angleY);
+	var gimbal_lock = Math.abs(c) < 0.0005;
+	
+	if (gimbal_lock) {
+		angleX = 0;
+		angleZ = Math.atan2(m.m10, m.m11);
+	} else {
+		angleX = Math.atan2(-m.m12, m.m22);
+		angleZ = Math.atan2(-m.m01, m.m00);
+	}
+	
+    var degX = angleX * radians;
+    var degY = angleY * radians;
+    var degZ = angleZ * radians;
+	
+	this.rotation[0] = degX;
+	this.rotation[1] = degY;
+    this.rotation[2] = degZ;
+}
+
+JSC3D.Viewer.prototype.rotateAboutXAxis = function(rotX) { /* Scene Rotation */
+	if (!!rotX) {
+		rotX %= 360;
+		this.rotMatrix.rotateAboutXAxis(rotX);
+		this.calcRotation();
+	}
+}
+
+JSC3D.Viewer.prototype.rotateAboutYAxis = function(rotY) { /* Scene Rotation */
+	if (!!rotY) {
+		rotY %= 360;
+		this.rotMatrix.rotateAboutYAxis(rotY);
+		this.calcRotation();
+	}
+}
+
+JSC3D.Viewer.prototype.rotateAboutZAxis = function(rotZ) { /* Scene Rotation */
+	if (!!rotZ) {
+		rotZ %= 360;
+		this.rotMatrix.rotateAboutZAxis(rotZ);
+		this.calcRotation();
+	}
+}
+
+JSC3D.Viewer.prototype.rotateScene = function(angle) { /* Scene Rotation */
+	if (!!angle) {
+		angle %= 360;			
+		var degX = this.rotation[0], degZ = this.rotation[2];
+		this.rotMatrix.rotateAboutXAxis(-degX);
+		this.rotMatrix.rotateAboutZAxis(-degZ);
+		this.rotMatrix.rotateAboutYAxis(angle);
+		this.rotMatrix.rotateAboutZAxis(degZ);
+		this.rotMatrix.rotateAboutXAxis(degX);
+	}
+}
 
 /**
 	Set render mode.<br />
@@ -524,7 +596,7 @@ JSC3D.Viewer.prototype.addTexture = function(textureUrlName) {
 	var texture = new JSC3D.Texture;
 	texture.createFromUrl(textureUrlName);
 	var fileName = textureUrlName.replace(/^.*(\\|\/|\:)/, '');
-	texture.name = fileName.substr(0,fileName.lastIndexOf(".")) || fileName + "";
+	texture.name = fileName.substr(0,fileName.lastIndexOf('.')) || fileName + '';
 	this.textures.push(texture);
 };
 
@@ -566,6 +638,11 @@ JSC3D.Viewer.prototype.getMaterial = function(materialName) {
  */
 JSC3D.Viewer.prototype.enableDefaultInputHandler = function(enabled) {
 	this.isDefaultInputHandlerEnabled = enabled;
+};
+
+/* Scene Rotation */
+JSC3D.Viewer.prototype.enableSceneRotation = function(enabled) {
+	this.isSceneRotationEnabled = enabled;
 };
 
 /**
@@ -624,9 +701,10 @@ JSC3D.Viewer.prototype.resetScene = function() {
 	this.zoomFactor = (d == 0) ? 1 : (this.frameWidth < this.frameHeight ? this.frameWidth : this.frameHeight) / d;
 	this.panning = [0, 0];
 	this.rotMatrix.identity();
-	this.rotMatrix.rotateAboutXAxis(this.initRotX);
-	this.rotMatrix.rotateAboutYAxis(this.initRotY);
-	this.rotMatrix.rotateAboutZAxis(this.initRotZ);
+	this.rotateAboutXAxis(this.initRotX); /* Scene Rotation */
+	this.rotateAboutYAxis(this.initRotY); /* Scene Rotation */
+	this.rotateAboutZAxis(this.initRotZ); /* Scene Rotation */
+	this.rotateScene(this.initSceneRotation); /* Scene Rotation */
 };
 
 /**
@@ -833,8 +911,12 @@ JSC3D.Viewer.prototype.mouseMoveHandler = function(e) {
 		else if(this.mouseUsage == 'default' || this.mouseUsage == 'rotate') {
 			var rotX = (e.clientY - this.mouseY) * 360 / this.canvas.width;
 			var rotY = (e.clientX - this.mouseX) * 360 / this.canvas.height;
-			this.rotMatrix.rotateAboutXAxis(rotX);
-			this.rotMatrix.rotateAboutYAxis(rotY);
+			if (this.isSceneRotationEnabled) { 
+				this.rotateScene(rotY); /* Scene Rotation */
+			} else {
+				this.rotateAboutXAxis(rotX); /* Scene Rotation */
+				this.rotateAboutYAxis(rotY); /* Scene Rotation */
+			}
 		}
 		this.mouseX = e.clientX;
 		this.mouseY = e.clientY;
@@ -963,8 +1045,12 @@ JSC3D.Viewer.prototype.touchMoveHandler = function(e) {
 		else if(this.mouseUsage == 'default' || this.mouseUsage == 'rotate') {
 			var rotX = (clientY - this.mouseY) * 360 / this.canvas.width;
 			var rotY = (clientX - this.mouseX) * 360 / this.canvas.height;
-			this.rotMatrix.rotateAboutXAxis(rotX);
-			this.rotMatrix.rotateAboutYAxis(rotY);
+			if (this.isSceneRotationEnabled) { 
+				this.rotateScene(rotY); /* Scene Rotation */
+			} else {
+				this.rotateAboutXAxis(rotX); /* Scene Rotation */
+				this.rotateAboutYAxis(rotY); /* Scene Rotation */
+			}
 		}
 		this.mouseX = clientX;
 		this.mouseY = clientY;
@@ -1047,8 +1133,12 @@ JSC3D.Viewer.prototype.gestureHandler = function(e) {
 		else if(!this.suppressDraggingRotation) {	// rotate
 			var rotX = (clientY - this.mouseY) * 360 / this.canvas.width;
 			var rotY = (clientX - this.mouseX) * 360 / this.canvas.height;
-			this.rotMatrix.rotateAboutXAxis(rotX);
-			this.rotMatrix.rotateAboutYAxis(rotY);
+			if (this.isSceneRotationEnabled) { 
+				this.rotateScene(rotY); /* Scene Rotation */
+			} else {
+				this.rotateAboutXAxis(rotX); /* Scene Rotation */
+				this.rotateAboutYAxis(rotY); /* Scene Rotation */
+			}
 		}
 		this.mouseX = clientX;
 		this.mouseY = clientY;
@@ -1261,9 +1351,10 @@ JSC3D.Viewer.prototype.setupScene = function(scene) {
 	}
 
 	this.rotMatrix.identity();
-	this.rotMatrix.rotateAboutXAxis(this.initRotX);
-	this.rotMatrix.rotateAboutYAxis(this.initRotY);
-	this.rotMatrix.rotateAboutZAxis(this.initRotZ);
+	this.rotateAboutXAxis(this.initRotX); /* Scene Rotation */
+	this.rotateAboutYAxis(this.initRotY); /* Scene Rotation */
+	this.rotateAboutZAxis(this.initRotZ); /* Scene Rotation */
+	this.rotateScene(this.initSceneRotation); /* Scene Rotation */
 	this.scene = scene;
 	this.isLoaded = true;
 	this.isFailed = false;
@@ -3577,8 +3668,10 @@ JSC3D.Viewer.prototype.needRepaint = false;
 JSC3D.Viewer.prototype.initRotX = 0;
 JSC3D.Viewer.prototype.initRotY = 0;
 JSC3D.Viewer.prototype.initRotZ = 0;
+JSC3D.Viewer.prototype.initSceneRotation = 0; /* Scene Rotation */
 JSC3D.Viewer.prototype.zoomFactor = 1;
 JSC3D.Viewer.prototype.panning = [0, 0];
+JSC3D.Viewer.prototype.rotation = [0, 0, 0]; /* Scene Rotation */
 JSC3D.Viewer.prototype.fps = 0; /* FPS */
 JSC3D.Viewer.prototype.rotMatrix = null;
 JSC3D.Viewer.prototype.transformMatrix = null;
@@ -3648,6 +3741,7 @@ JSC3D.Viewer.prototype.beforeupdate = null;
 JSC3D.Viewer.prototype.afterupdate = null;
 JSC3D.Viewer.prototype.mouseUsage = 'default';
 JSC3D.Viewer.prototype.isDefaultInputHandlerEnabled = false;
+JSC3D.Viewer.prototype.isSceneRotationEnabled = false; /* Scene Rotation */
 JSC3D.Viewer.prototype.ontick = null; /* FPS */
 
 /**
