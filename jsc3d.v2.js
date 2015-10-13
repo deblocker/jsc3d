@@ -376,6 +376,79 @@ JSC3D.Viewer.prototype.update = function(repaintOnly) {
 };
 
 /**
+	Setup an initial empty scene with given extent
+ */
+JSC3D.Viewer.prototype.createScene = function(minX, maxX, minY, maxY, minZ, maxZ) {
+	if(this.abortUnfinishedLoadingFn)
+		this.abortUnfinishedLoadingFn();
+
+	this.scene = null;
+	this.isLoaded = false;
+	this.update();
+	
+	var scene = new JSC3D.Scene;
+	scene.aabb = new JSC3D.AABB();
+	scene.aabb.minX = minX;
+	scene.aabb.maxX = maxX;
+	scene.aabb.minY = minY;
+	scene.aabb.maxY = maxY;
+	scene.aabb.minZ = minZ;
+	scene.aabb.maxZ = maxZ;
+	this.replaceScene(scene);
+};
+
+/**
+	Groundplane, thanks: humu2009
+ */
+JSC3D.Viewer.prototype.makeGroundPlane = function(color, renderMode) {
+	var sceneBox = this.scene.aabb;
+	var planeCenter = sceneBox.center();
+	var planeHalfSize = 0.5 * Math.max(sceneBox.maxX - sceneBox.minX, sceneBox.maxZ - sceneBox.minZ);
+
+	var planeMinX = planeCenter[0] - planeHalfSize;
+	var planeMinZ = planeCenter[2] - planeHalfSize;
+
+	/* move the ground plane slightly off the bottom of the bounding box */
+	/* to avoid potential z-fighting between the plane and the model */
+	var planeY = sceneBox.minY - 0.001 * (sceneBox.maxY - sceneBox.minY);
+
+	/* to be simple, we just split the ground plane to 10x10 sub faces */
+	var numOfGridsPerDimension = 10;
+	var sizePerGrid = 2 * planeHalfSize / numOfGridsPerDimension;
+
+	/* construct the ground plane */
+	groundPlane = new JSC3D.Mesh;
+	groundPlane.name = 'groundplane';
+	/* compute vertices of the plane */
+	groundPlane.vertexBuffer = [];
+	for (var i=0; i<=numOfGridsPerDimension; i++) {
+		for (var j=0; j<=numOfGridsPerDimension; j++) {
+			groundPlane.vertexBuffer.push(planeMinX + j * sizePerGrid, planeY, planeMinZ + i * sizePerGrid);
+		}
+	}
+
+	/* compute indices of the plane */
+	groundPlane.indexBuffer = [];
+	for (var i=0; i<numOfGridsPerDimension; i++) {
+		for (var j=0; j<numOfGridsPerDimension; j++) {
+			groundPlane.indexBuffer.push(
+				i * (numOfGridsPerDimension + 1) + j, 
+				(i + 1) * (numOfGridsPerDimension + 1) + j, 
+				(i + 1) * (numOfGridsPerDimension + 1) + j + 1, 
+				i * (numOfGridsPerDimension + 1) + j + 1, 
+				-1 
+			);
+		}
+	}
+	
+	groundPlane.isDoubleSided = true; /* disable backface culling */
+	groundPlane.init();
+	groundPlane.setRenderMode(renderMode);
+	groundPlane.setMaterial(new JSC3D.Material('groundplane', undefined, color, 0, false, false)); /* EnvironmentCast of material */
+	this.scene.addChild(groundPlane);
+};
+
+/**
 	Viewer Resize
  */
 JSC3D.Viewer.prototype.getInnerSize = function() {
