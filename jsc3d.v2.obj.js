@@ -101,6 +101,10 @@ JSC3D.ObjLoader.prototype.loadObjFile = function(urlPath, fileName, queryPart) {
 						JSC3D.console.logInfo('Finished loading obj file "' + urlName + '".');
 					var scene = new JSC3D.Scene;
 					scene.srcUrl = urlName;
+					/* Mesh grouping by name +++ */
+					var sceneName = fileName.replace(/^.*(\\|\/|\:)/, '');
+					scene.name = sceneName.substr(0,sceneName.lastIndexOf('.')) || sceneName + '';
+					/* Mesh grouping by name --- */
 					var mtllibs = self.parseObj(scene, this.responseText);
 					if(mtllibs.length > 0) {
 						for(var i=0; i<mtllibs.length; i++)
@@ -203,7 +207,7 @@ JSC3D.ObjLoader.prototype.loadMtlFile = function(scene, urlPath, fileName) {
 JSC3D.ObjLoader.prototype.parseObj = function(scene, data) {
 	var meshes = {};
 	var mtllibs = [];
-	var namePrefix = 'obj-';
+	var namePrefix = (scene.name || "obj") + "-"; /* Mesh grouping by name */
 	var meshIndex = 0;
 	var curMesh = null;
 	var curMtllibName = '';
@@ -266,6 +270,12 @@ JSC3D.ObjLoader.prototype.parseObj = function(scene, data) {
 					curMesh.indexBuffer.push(-1);				// mark the end of vertex index sequence for the face
 					if(curMesh.texCoordIndexBuffer)
 						curMesh.texCoordIndexBuffer.push(-1);	// mark the end of vertex tex coord index sequence for the face
+				}
+				break;
+			case 'g':
+				/* TODO v2: why not use "g" to create new meshes? */
+				if(tokens.length > 1 && tokens[1] != '') {
+					var curMeshName = tokens[1];
 				}
 				break;
 			case 'mtllib':

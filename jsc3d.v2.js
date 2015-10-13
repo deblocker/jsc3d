@@ -117,6 +117,8 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.initRotX = 0;
 	this.initRotY = 0;
 	this.initRotZ = 0;
+	this.initSceneRotation = 0; /* Scene Rotation */
+	this.isSceneRotationEnabled = false;  /* Scene Rotation */
 	this.zoomFactor = 1;
 	this.panning = [0, 0];
 	this.rotation = [0, 0, 0]; /* Scene Rotation */
@@ -1406,7 +1408,7 @@ JSC3D.Viewer.prototype.setupScene = function(scene) {
 
 	scene.init();
 
-	if(!scene.isEmpty()) {
+	if(scene.aabb) {  /* Setup an initial empty scene with given extent */
 		var d = scene.aabb.lengthOfDiagonal();
 		var w = this.frameWidth;
 		var h = this.frameHeight;
@@ -1768,14 +1770,14 @@ JSC3D.Viewer.prototype.render = function() {
 	if(this.scene.isEmpty())
 		return;
 
+	var w = this.frameWidth;
+	var h = this.frameHeight;
 	var aabb = this.scene.aabb;
 
 	// calculate transformation matrix
 	if(this.webglBackend) {
-		var w = this.frameWidth;
-		var h = this.frameHeight;
 		var d = aabb.lengthOfDiagonal();
-
+		/* TODO v2: fix meshes goes sometimes clipped in Z+ */
 		this.transformMatrix.identity();
 		this.transformMatrix.translate(-0.5*(aabb.minX+aabb.maxX), -0.5*(aabb.minY+aabb.maxY), -0.5*(aabb.minZ+aabb.maxZ));
 		this.transformMatrix.multiply(this.rotMatrix);
@@ -1787,7 +1789,7 @@ JSC3D.Viewer.prototype.render = function() {
 		this.transformMatrix.translate(-0.5*(aabb.minX+aabb.maxX), -0.5*(aabb.minY+aabb.maxY), -0.5*(aabb.minZ+aabb.maxZ));
 		this.transformMatrix.multiply(this.rotMatrix);
 		this.transformMatrix.scale(this.zoomFactor, -this.zoomFactor, this.zoomFactor);
-		this.transformMatrix.translate(0.5*this.frameWidth+this.panning[0], 0.5*this.frameHeight+this.panning[1], 0);
+		this.transformMatrix.translate(0.5*w+this.panning[0], 0.5*h+this.panning[1], 0);
 	}
 
 	// sort meshes into a render list
@@ -1903,7 +1905,7 @@ JSC3D.Viewer.prototype.renderPoint = function(mesh) {
 	var h = this.frameHeight;
 	var xbound = w - 1;
 	var ybound = h - 1;
-	var ibuf = mesh.indexBuffer;
+//	var ibuf = mesh.indexBuffer;
 	var vbuf = mesh.transformedVertexBuffer;
 //	var nbuf = mesh.transformedVertexNormalZBuffer;
 	var cbuf = this.colorBuffer;
@@ -3945,6 +3947,22 @@ JSC3D.Scene.prototype.calcAABB = function() {
 };
 
 /**
+	Mesh grouping by name
+ */
+JSC3D.Scene.prototype.getMeshes = function(groupName) {
+	var meshes = [];
+	var indexPos = -1, pos = -1;
+	for (var i=0,l=this.children.length; i<l; i++) {
+		var mesh = this.children[i];
+		indexPos = mesh.name.lastIndexOf("-"); 
+		pos = (indexPos === -1) ? mesh.name.length : indexPos;
+		if (mesh.name.substring(0, pos) === groupName)
+			meshes.push(mesh);
+	}
+	return meshes;
+};
+
+/**
  * {String} Name of the scene.
  */
 JSC3D.Scene.prototype.name = '';
@@ -4155,8 +4173,9 @@ JSC3D.Mesh.prototype.calcFaceCount = function() {
 	@private
  */
 JSC3D.Mesh.prototype.calcAABB = function() {
-	var minX = minY = minZ = Infinity;
-	var maxX = maxY = maxZ = -Infinity;
+	var minX, minY, minZ, maxX, maxY, maxZ;
+	minX = minY = minZ = Infinity;
+	maxX = maxY = maxZ = -Infinity;
 
 	var vbuf = this.vertexBuffer;
 	for(var i=0; i<vbuf.length; i+=3) {
@@ -4184,6 +4203,32 @@ JSC3D.Mesh.prototype.calcAABB = function() {
 	this.aabb.maxX = maxX;
 	this.aabb.maxY = maxY;
 	this.aabb.maxZ = maxZ;
+};
+
+/**
+	Mesh movements - rotation center (pivoting)
+	default: "center"
+ */
+JSC3D.Mesh.prototype.setRotationMode = function(rotationMode) {
+	/** 
+		"axis":   mesh will rotate about mesh axis using stored translation
+		"scene":  mesh will rotate about scene center, e.g. orbit
+		"center": mesh will rotate about mesh.aabb.center
+	*/
+	this.rotationMode = rotationMode;
+};
+
+/**
+	Mesh movements - resize center (direction)
+	default: "center"
+ */
+JSC3D.Mesh.prototype.setResizeMode = function(resizeMode) {
+	/** 
+		"plus":   mesh.aabb.minX, .minY, .minZ remains untouched
+		"minus":  mesh.aabb.maxX, .maxY, .maxZ remains untouched
+		"center": mesh will resize centered to mesh.aabb.center
+	*/
+	this.resizeMode = resizeMode;
 };
 
 /**
@@ -4792,6 +4837,87 @@ JSC3D.Mesh.prototype.flipZ = function() {
 	this.compiled = null;
 };
 /* Mesh positioning --- */
+
+/* Mesh grouping by name +++ */
+JSC3D.Mesh.prototype.getGroupName = function() {
+	return this.name.substring(0, this.name.lastIndexOf('-'));
+};
+
+JSC3D.Mesh.prototype.setGroupName = function(newGroupName, newGroupIndex) {
+	var groupName = this.getGroupName();
+	var groupIndex = this.name.substring(this.name.lastIndexOf('-'));
+	this.name = (newGroupName) ? newGroupName : groupName;
+	this.name += (newGroupIndex) ? ('-' + newGroupIndex) : groupIndex;
+};
+/* Mesh grouping by name --- */
+
+/* Mesh clone +++ */
+JSC3D.Mesh.prototype.clone = function(scene, rotation, translation, size) {
+	var newMesh = new JSC3D.Mesh;
+	newMesh.name = this.name;
+	newMesh.creaseAngle = this.creaseAngle;
+	newMesh.isDoubleSided = this.isDoubleSided;
+	newMesh.isEnvironmentCast = this.isEnvironmentCast; /* obsolete */
+	newMesh.renderMode = this.renderMode;
+	newMesh.rotationMode = scene.meshRotationMode;
+	newMesh.resizeMode = scene.meshResizeMode;
+	newMesh.visible = this.visible;
+	
+	var xformMat = new JSC3D.Matrix3x4;
+	var normalMat = new JSC3D.Matrix3x4;
+	var vertexRotMat = new JSC3D.Matrix3x4;
+
+	var pivot;
+	switch (newMesh.rotationMode) {
+		case 'axis':
+			//pivot = [newMesh.translation[0],newMesh.translation[1],newMesh.translation[2]];
+			break;
+		case 'scene':
+			break;
+		case 'center':
+			pivot = this.aabb.center();
+			break;
+	}
+	
+	if (rotation) {
+		if (pivot) vertexRotMat.translate(-pivot[0], -pivot[1], -pivot[2]);	
+		if (!!rotation[0]) { 
+			normalMat.rotateAboutXAxis(rotation[0]); 
+			vertexRotMat.rotateAboutXAxis(rotation[0]); 
+		}
+		if (!!rotation[1]) {
+			normalMat.rotateAboutYAxis(rotation[1]); 
+			vertexRotMat.rotateAboutYAxis(rotation[1]); 
+		}
+		if (!!rotation[2]) { 
+			normalMat.rotateAboutZAxis(rotation[2]); 
+			vertexRotMat.rotateAboutZAxis(rotation[2]); 
+		}
+		if (pivot) vertexRotMat.translate(pivot[0], pivot[1], pivot[2]);
+	}
+	
+	if (translation) xformMat.translate(translation[0], translation[1], translation[2]);
+	if (size) xformMat.scale(size[0], size[1], size[2]);
+	
+	xformMat.multiply(vertexRotMat);
+	newMesh.indexBuffer = this.indexBuffer;
+	newMesh.vertexBuffer = new Array(this.vertexBuffer.length);
+	newMesh.faceNormalBuffer = new Array(this.faceNormalBuffer.length);
+
+	JSC3D.Math3D.transformVectors(xformMat, this.vertexBuffer, newMesh.vertexBuffer);
+	JSC3D.Math3D.transformVectors(normalMat, this.faceNormalBuffer, newMesh.faceNormalBuffer);
+
+	newMesh.mtllib = this.mtllib;
+	newMesh.mtl = this.mtl;
+	newMesh.setMaterial(this.material);
+	newMesh.setTexture(this.texture);
+	newMesh.texCoordBuffer = []; /* TODO ? */
+	newMesh.texCoordIndexBuffer = []; /* TODO ? */
+	newMesh.init();
+	scene.addChild(newMesh);
+	return newMesh;
+};
+/* Mesh clone --- */
 
 /**
 	@class Material
