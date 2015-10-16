@@ -52,7 +52,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 			InitRotationX:		parameters.InitRotationX || 0, 
 			InitRotationY:		parameters.InitRotationY || 0, 
 			InitRotationZ:		parameters.InitRotationZ || 0, 
-			SceneRotation:      parameters.SceneRotation ||  'off', /* Scene Rotation */
+			SceneRotation:		parameters.SceneRotation ||  'off', /* Scene Rotation */
 			InitSceneRotation:	parameters.InitSceneRotation || 0,  /* Scene Rotation */
 			ModelColor:			parameters.ModelColor || '#caa618', 
 			BackgroundColor1:	parameters.BackgroundColor1 || '#ffffff', 
@@ -68,6 +68,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 			ProgressBar:		parameters.ProgressBar || 'on', 
 			Renderer:			parameters.Renderer || '', 
 			AutoUpdate:			parameters.AutoUpdate || 'off',  /* FPS */
+			AutoRotateSpeed:	parameters.AutoRotateSpeed || 0, /* AutoRotation */
 			LocalBuffers:		parameters.LocalBuffers || 'retain'
 		};
 	else
@@ -92,6 +93,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 			ProgressBar: 'on', 
 			Renderer: '', 
 			AutoUpdate: 'off', /* FPS */
+			AutoRotateSpeed: 0, /* AutoRotation */
 			LocalBuffers: 'retain'
 		};
 
@@ -138,7 +140,8 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.isMipMappingOn = false;
 	this.creaseAngle = -180;
 	this.sphereMapUrl = '';
-	this.isAutoUpdateOn = false;
+	this.isAutoUpdateOn = false; /* FPS */
+	this.autoRotateSpeed = 0; /* AutoRotation */
 	this.showProgressBar = true;
 	this.buttonStates = {};
 	this.keyStates = {};
@@ -240,6 +243,7 @@ JSC3D.Viewer.prototype.init = function() {
 	this.showProgressBar = this.params['ProgressBar'].toLowerCase() == 'on';
 	this.useWebGL = this.params['Renderer'].toLowerCase() == 'webgl';
 	this.isAutoUpdateOn = this.params['AutoUpdate'].toLowerCase() == 'on'; /* FPS */
+	this.autoRotateSpeed = parseFloat(this.params['AutoRotateSpeed']); /* AutoRotation */
 	this.releaseLocalBuffers = this.params['LocalBuffers'].toLowerCase() == 'release';
 	this.isSceneRotationEnabled = this.params['SceneRotation'].toLowerCase() == 'on'; /* Scene Rotation */
 	this.initSceneRotation = parseFloat(this.params['InitSceneRotation']); /* Scene Rotation */
@@ -344,8 +348,6 @@ JSC3D.Viewer.prototype.init = function() {
 			self.fps += (fps - self.fps) / 30; /* low-pass filter */
 			frameUpdateTime = now;
 		}
-		if (self.isAutoUpdateOn) 
-			self.needUpdate = true;
 		self.doUpdate();
 		if(self.ontick != null && (typeof self.ontick) == 'function')
 			self.ontick();
@@ -525,6 +527,12 @@ JSC3D.Viewer.prototype.rotateScene = function(angle) { /* Scene Rotation */
 	}
 }
 
+JSC3D.Viewer.prototype.autoRotateScene = function() { /* AutoRotation */
+	/* TODO: enhance with ease-in-out */
+	if (this.autoRotateSpeed != 0) {
+		this.rotateScene(this.autoRotateSpeed);
+	}
+}
 /**
 	Set render mode.<br />
 	Available render modes are:<br />
@@ -843,6 +851,10 @@ JSC3D.Viewer.prototype.pick = function(clientX, clientY) {
 	@private
  */
 JSC3D.Viewer.prototype.doUpdate = function() {
+	this.autoRotateScene(); /* AutoRotation */
+	if (this.isAutoUpdateOn) 
+		this.needUpdate = true;
+	
 	if(this.needUpdate || this.needRepaint) {
 		if(this.beforeupdate != null && (typeof this.beforeupdate) == 'function')
 			this.beforeupdate();
@@ -3752,7 +3764,8 @@ JSC3D.Viewer.prototype.isMipMappingOn = false;
 JSC3D.Viewer.prototype.creaseAngle = -180;
 JSC3D.Viewer.prototype.sphereMapUrl = '';
 JSC3D.Viewer.prototype.showProgressBar = true;
-JSC3D.Viewer.prototype.isAutoUpdateOn = false;
+JSC3D.Viewer.prototype.isAutoUpdateOn = false; /* FPS */
+JSC3D.Viewer.prototype.autoRotateSpeed = 0; /* AutoRotation */
 JSC3D.Viewer.prototype.buttonStates = null;
 JSC3D.Viewer.prototype.keyStates = null;
 JSC3D.Viewer.prototype.mouseX = 0;
