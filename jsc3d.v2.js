@@ -402,57 +402,6 @@ JSC3D.Viewer.prototype.createScene = function(minX, maxX, minY, maxY, minZ, maxZ
 };
 
 /**
-	Groundplane, thanks: humu2009
- */
-JSC3D.Viewer.prototype.makeGroundPlane = function(color, renderMode) {
-	var sceneBox = this.scene.aabb;
-	var planeCenter = sceneBox.center();
-	var planeHalfSize = 0.5 * Math.max(sceneBox.maxX - sceneBox.minX, sceneBox.maxZ - sceneBox.minZ);
-
-	var planeMinX = planeCenter[0] - planeHalfSize;
-	var planeMinZ = planeCenter[2] - planeHalfSize;
-
-	/* move the ground plane slightly off the bottom of the bounding box */
-	/* to avoid potential z-fighting between the plane and the model */
-	var planeY = sceneBox.minY - 0.001 * (sceneBox.maxY - sceneBox.minY);
-
-	/* to be simple, we just split the ground plane to 10x10 sub faces */
-	var numOfGridsPerDimension = 10;
-	var sizePerGrid = 2 * planeHalfSize / numOfGridsPerDimension;
-
-	/* construct the ground plane */
-	groundPlane = new JSC3D.Mesh;
-	groundPlane.name = 'groundplane';
-	/* compute vertices of the plane */
-	groundPlane.vertexBuffer = [];
-	for (var i=0; i<=numOfGridsPerDimension; i++) {
-		for (var j=0; j<=numOfGridsPerDimension; j++) {
-			groundPlane.vertexBuffer.push(planeMinX + j * sizePerGrid, planeY, planeMinZ + i * sizePerGrid);
-		}
-	}
-
-	/* compute indices of the plane */
-	groundPlane.indexBuffer = [];
-	for (var i=0; i<numOfGridsPerDimension; i++) {
-		for (var j=0; j<numOfGridsPerDimension; j++) {
-			groundPlane.indexBuffer.push(
-				i * (numOfGridsPerDimension + 1) + j, 
-				(i + 1) * (numOfGridsPerDimension + 1) + j, 
-				(i + 1) * (numOfGridsPerDimension + 1) + j + 1, 
-				i * (numOfGridsPerDimension + 1) + j + 1, 
-				-1 
-			);
-		}
-	}
-	
-	groundPlane.isDoubleSided = true; /* disable backface culling */
-	groundPlane.init();
-	groundPlane.setRenderMode(renderMode);
-	groundPlane.setMaterial(new JSC3D.Material('groundplane', undefined, color, 0, false, false)); /* EnvironmentCast of material */
-	this.scene.addChild(groundPlane);
-};
-
-/**
 	Viewer Resize
  */
 JSC3D.Viewer.prototype.getInnerSize = function() {
@@ -772,6 +721,8 @@ JSC3D.Viewer.prototype.resetScene = function() {
 	var d = (!this.scene || this.scene.isEmpty()) ? 0 : this.scene.aabb.lengthOfDiagonal();
 	this.zoomFactor = (d == 0) ? 1 : (this.frameWidth < this.frameHeight ? this.frameWidth : this.frameHeight) / d;
 	this.panning = [0, 0];
+	this.currentMesh = null; /* Selected mesh */
+	this.currentGroupName = ''; /* Selected mesh group name */
 	this.rotMatrix.identity();
 	this.rotateAboutXAxis(this.initRotX); /* Scene Rotation */
 	this.rotateAboutYAxis(this.initRotY); /* Scene Rotation */
@@ -906,10 +857,16 @@ JSC3D.Viewer.prototype.mouseDownHandler = function(e) {
 		return;
 
 	if(this.onmousedown) {
+		/* TODO: Drag & Drop mesh */
 		var info = this.pick(e.clientX, e.clientY);
-		this.onmousedown(info.canvasX, info.canvasY, e.button, info.depth, info.mesh);
+		/* Selected mesh group name */
+		this.scene.currentMesh = info.mesh;
+		var groupName = info.mesh ? info.mesh.getGroupName() : null; 
+		this.scene.currentGroupName = groupName;
+		if(this.onmousedown)
+			this.onmousedown(info.canvasX, info.canvasY, e.button, info.depth, info.mesh, groupName);
 	}
-
+	
 	e.preventDefault();
 	e.stopPropagation();
 
@@ -937,6 +894,7 @@ JSC3D.Viewer.prototype.mouseUpHandler = function(e) {
 	}
 
 	if(this.onmouseup) {
+		/* TODO: Drag & Drop mesh */
 		this.onmouseup(info.canvasX, info.canvasY, e.button, info.depth, info.mesh);
 	}
 
@@ -964,6 +922,7 @@ JSC3D.Viewer.prototype.mouseMoveHandler = function(e) {
 		return;
 
 	if(this.onmousemove) {
+		/* TODO: Drag & Drop mesh */
 		var info = this.pick(e.clientX, e.clientY);
 		this.onmousemove(info.canvasX, info.canvasY, e.button, info.depth, info.mesh);
 	}
@@ -1039,10 +998,16 @@ JSC3D.Viewer.prototype.touchStartHandler = function(e) {
 		var clientY = e.touches[0].clientY;
 
 		if(this.onmousedown) {
+			/* TODO: Drag & Drop mesh */
 			var info = this.pick(clientX, clientY);
-			this.onmousedown(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
+			/* Selected mesh group name */
+			this.scene.currentMesh = info.mesh;
+			var groupName = info.mesh ? info.mesh.getGroupName() : null; 
+			this.scene.currentGroupName = groupName;
+			if(this.onmousedown)
+				this.onmousedown(info.canvasX, info.canvasY, 0, info.depth, info.mesh, groupName);
 		}
-
+		
 		e.preventDefault();
 		e.stopPropagation();
 
@@ -1071,6 +1036,7 @@ JSC3D.Viewer.prototype.touchEndHandler = function(e) {
 	}
 
 	if(this.onmouseup) {
+		/* TODO: Drag & Drop mesh */
 		this.onmouseup(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
 	}
 
@@ -1102,7 +1068,8 @@ JSC3D.Viewer.prototype.touchMoveHandler = function(e) {
 		var clientY = e.touches[0].clientY;
 
 		if(this.onmousemove) {
-			var info = this.pick(clientX, clientY);
+			/* TODO: Drag & Drop mesh */
+			var info = this.pick(clientX, clientY); 
 			this.onmousemove(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
 		}
 
@@ -1173,11 +1140,13 @@ JSC3D.Viewer.prototype.gestureHandler = function(e) {
 	var clientX = e.gesture.center.pageX - document.body.scrollLeft;
 	var clientY = e.gesture.center.pageY - document.body.scrollTop;
 	var info = this.pick(clientX, clientY);
+	/* Selected mesh group name */
+	var groupName = info.mesh ? info.mesh.getGroupName() : null; 
 
 	switch(e.type) {
 	case 'touch':
 		if(this.onmousedown)
-			this.onmousedown(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
+			this.onmousedown(info.canvasX, info.canvasY, 0, info.depth, info.mesh, groupName);
 		this.baseZoomFactor = this.zoomFactor;
 		this.mouseX = clientX;
 		this.mouseY = clientY;
@@ -1185,22 +1154,24 @@ JSC3D.Viewer.prototype.gestureHandler = function(e) {
 		this.mouseDownY = clientY;
 		break;
 	case 'release':
+		/* TODO: Drag & Drop mesh */
 		if(this.onmouseup)
 			this.onmouseup(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
 		if(this.onmouseclick && this.mouseDownX == clientX && this.mouseDownY == clientY)
-			this.onmouseclick(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
+			this.onmouseclick(info.canvasX, info.canvasY, 0, info.depth, info.mesh, meshGroupName);
 		this.mouseDownX = -1;
 		this.mouseDownY = -1;
 		this.isTouchHeld = false;
 		break;
 	case 'hold':
+		/* TODO: Drag & Drop mesh */
 		this.isTouchHeld = true;
 		this.mouseDownX = -1;
 		this.mouseDownY = -1;
 		break;
 	case 'drag':
 		if(this.onmousemove)
-			this.onmousemove(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
+			this.onmousemove(info.canvasX, info.canvasY, 0, info.depth, info.mesh, meshGroupName);
 		if(!this.isDefaultInputHandlerEnabled)
 			break;
 		if(this.isTouchHeld) {						// pan
@@ -1226,7 +1197,7 @@ JSC3D.Viewer.prototype.gestureHandler = function(e) {
 		break;
 	case 'pinch':									// zoom
 		if(this.onmousewheel)
-			this.onmousewheel(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
+			this.onmousewheel(info.canvasX, info.canvasY, 0, info.depth, info.mesh, meshGroupName);
 		if(!this.isDefaultInputHandlerEnabled)
 			break;
 		this.suppressDraggingRotation = true;
@@ -3860,6 +3831,8 @@ JSC3D.Scene = function(name) {
 	this.aabb = null;
 	this.children = [];
 	this.maxChildId = 1;
+	this.currentMesh = null; /* Selected mesh */
+	this.currentGroupName = ''; /* Selected mesh group name */
 };
 
 /**
@@ -3868,7 +3841,10 @@ JSC3D.Scene = function(name) {
 JSC3D.Scene.prototype.init = function() {
 	if(this.isEmpty())
 		return;
-
+	
+	this.currentMesh = null; /* Selected mesh */
+	this.currentGroupName = ''; /* Selected mesh group name */
+	
 	for(var i=0; i<this.children.length; i++)
 		this.children[i].init();
 
@@ -3900,6 +3876,7 @@ JSC3D.Scene.prototype.addChild = function(mesh) {
 	@param {JSC3D.Mesh} mesh the mesh to be removed.
  */
 JSC3D.Scene.prototype.removeChild = function(mesh) {
+	/* TODO: check existence of currentMesh, currentGroupName */
 	var foundAt = this.children.indexOf(mesh);
 	if(foundAt >= 0)
 		this.children.splice(foundAt, 1);
@@ -3960,22 +3937,6 @@ JSC3D.Scene.prototype.calcAABB = function() {
 };
 
 /**
-	Mesh grouping by name
- */
-JSC3D.Scene.prototype.getMeshes = function(groupName) {
-	var meshes = [];
-	var indexPos = -1, pos = -1;
-	for (var i=0,l=this.children.length; i<l; i++) {
-		var mesh = this.children[i];
-		indexPos = mesh.name.lastIndexOf("-"); 
-		pos = (indexPos === -1) ? mesh.name.length : indexPos;
-		if (mesh.name.substring(0, pos) === groupName)
-			meshes.push(mesh);
-	}
-	return meshes;
-};
-
-/**
  * {String} Name of the scene.
  */
 JSC3D.Scene.prototype.name = '';
@@ -3989,8 +3950,28 @@ JSC3D.Scene.prototype.srcUrl = '';
 JSC3D.Scene.prototype.aabb = null;
 JSC3D.Scene.prototype.children = null;
 JSC3D.Scene.prototype.maxChildId = 1;
+JSC3D.Scene.prototype.currentMesh = null; /* Selected mesh */
+JSC3D.Scene.prototype.currentGroupName = ''; /* Selected mesh group name */
 JSC3D.Scene.prototype.meshResizeMode = 'center'; /* Mesh positioning  */
 JSC3D.Scene.prototype.meshRotationMode = 'center'; /* Mesh positioning  */
+
+/**
+	Mesh grouping by name
+ */
+JSC3D.Scene.prototype.getMeshes = function(groupName) {
+	if (!groupName)
+		return null;
+	var meshes = [];
+	var indexPos = -1, pos = -1;
+	for (var i=0,l=this.children.length; i<l; i++) {
+		var mesh = this.children[i];
+		indexPos = mesh.name.lastIndexOf('-'); 
+		pos = (indexPos === -1) ? mesh.name.length : indexPos;
+		if (mesh.name.substring(0, pos) === groupName)
+			meshes.push(mesh);
+	}
+	return meshes;
+};
 
 /**
 	Mesh positioning - Default resize center for new meshes (direction of increase/decrease size)
@@ -4014,6 +3995,57 @@ JSC3D.Scene.prototype.setMeshRotationMode = function(rotationMode) {
 		"center": mesh will rotate about mesh.aabb.center
 	*/
 	this.meshRotationMode = rotationMode;
+};
+
+/**
+	Groundplane, thanks: humu2009
+ */
+JSC3D.Scene.prototype.makeGroundPlane = function(color, renderMode) {
+	var sceneBox = this.aabb;
+	var planeCenter = sceneBox.center();
+	var planeHalfSize = 0.5 * Math.max(sceneBox.maxX - sceneBox.minX, sceneBox.maxZ - sceneBox.minZ);
+
+	var planeMinX = planeCenter[0] - planeHalfSize;
+	var planeMinZ = planeCenter[2] - planeHalfSize;
+
+	/* move the ground plane slightly off the bottom of the bounding box */
+	/* to avoid potential z-fighting between the plane and the model */
+	var planeY = sceneBox.minY - 0.001 * (sceneBox.maxY - sceneBox.minY);
+
+	/* to be simple, we just split the ground plane to 10x10 sub faces */
+	var numOfGridsPerDimension = 10;
+	var sizePerGrid = 2 * planeHalfSize / numOfGridsPerDimension;
+
+	/* construct the ground plane */
+	groundPlane = new JSC3D.Mesh;
+	groundPlane.name = 'groundplane';
+	/* compute vertices of the plane */
+	groundPlane.vertexBuffer = [];
+	for (var i=0; i<=numOfGridsPerDimension; i++) {
+		for (var j=0; j<=numOfGridsPerDimension; j++) {
+			groundPlane.vertexBuffer.push(planeMinX + j * sizePerGrid, planeY, planeMinZ + i * sizePerGrid);
+		}
+	}
+
+	/* compute indices of the plane */
+	groundPlane.indexBuffer = [];
+	for (var i=0; i<numOfGridsPerDimension; i++) {
+		for (var j=0; j<numOfGridsPerDimension; j++) {
+			groundPlane.indexBuffer.push(
+				i * (numOfGridsPerDimension + 1) + j, 
+				(i + 1) * (numOfGridsPerDimension + 1) + j, 
+				(i + 1) * (numOfGridsPerDimension + 1) + j + 1, 
+				i * (numOfGridsPerDimension + 1) + j + 1, 
+				-1 
+			);
+		}
+	}
+	
+	groundPlane.isDoubleSided = true; /* disable backface culling */
+	groundPlane.init();
+	groundPlane.setRenderMode(renderMode);
+	groundPlane.setMaterial(new JSC3D.Material('groundplane', undefined, color, 0, false, false)); /* EnvironmentCast of material */
+	this.addChild(groundPlane);
 };
 
 /**
