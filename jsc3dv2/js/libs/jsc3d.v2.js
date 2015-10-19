@@ -4633,7 +4633,7 @@ JSC3D.Mesh.prototype.scale = function(scaling) {
 		this.scaling[1] *= pctY;
 	}
 	if (scaling[2]) {
-		pctZ = scaling[0]/this.scaling[2];
+		pctZ = scaling[2]/this.scaling[2];
 		/* store scaling */
 		this.scaling[2] *= pctZ;
 	}
