@@ -212,7 +212,7 @@ JSC3D.OpenCTMLoader = function(onload, onerror, onprogress, onresource) {
 	if(this.onprogress) {
 		this.onprogress('Loading CTM file ...', 0);
 		xhr.onprogress = function(event) {
-			self.onprogress('Loading CTM file ...', event.position / event.totalSize);
+			self.onprogress('Loading CTM file ...', event.loaded / event.total);
 		};
 	}
 
