@@ -179,8 +179,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 		this.canvas.addEventListener('mousedown', function(e){self.mouseDownHandler(e);}, false);
 		this.canvas.addEventListener('mouseup', function(e){self.mouseUpHandler(e);}, false);
 		this.canvas.addEventListener('mousemove', function(e){self.mouseMoveHandler(e);}, false);
-		this.canvas.addEventListener(JSC3D.PlatformInfo.browser == 'firefox' ? 'DOMMouseScroll' : 'mousewheel', 
-									 function(e){self.mouseWheelHandler(e);}, false);
+		this.canvas.addEventListener('onwheel' in document ? 'wheel' : 'onmousewheel' in document ? 'mousewheel' : 'DOMMouseScroll', function(e){self.mouseWheelHandler(e);});
 		document.addEventListener('keydown', function(e){self.keyDownHandler(e);}, false);
 		document.addEventListener('keyup', function(e){self.keyUpHandler(e);}, false);
 	}
@@ -981,7 +980,7 @@ JSC3D.Viewer.prototype.mouseWheelHandler = function(e) {
 	this.mouseDownX = -1;
 	this.mouseDownY = -1;
 
-	this.zoomFactor *= (JSC3D.PlatformInfo.browser == 'firefox' ? -e.detail : e.wheelDelta) < 0 ? 1.1 : 0.91;
+	this.zoomFactor *= (e.wheelDelta ? e.wheelDelta : e.deltaY ? -e.deltaY : -e.detail) < 0 ? 1.1 : 0.91;
 	this.update();
 };
 
