@@ -120,6 +120,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.initRotY = 0;
 	this.initRotZ = 0;
 	this.initSceneRotation = 0; /* Scene Rotation */
+	this.sceneRotation = 0; /* Scene Rotation */
 	this.isSceneRotationEnabled = false;  /* Scene Rotation */
 	this.zoomFactor = 1;
 	this.panning = [0, 0];
@@ -164,6 +165,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.onmouseclick = null;
 	this.beforeupdate = null;
 	this.afterupdate = null;
+	this.onscenerotation = null; /* Scene Rotation */
 	this.ontick = null; /* FPS */
 	this.mouseUsage = 'default';
 	this.isDefaultInputHandlerEnabled = true;
@@ -172,6 +174,20 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.messagePanel = null;
 	this.webglBackend = null;
 
+	/* Modern all-in-one touch & tablet w. kb */
+
+    /* 
+	Event sequence:
+	1) touchstart
+    2) touchmove
+    3) touchend
+    4) mouseover
+    5) mousemove
+    6) mousedown
+    7) mouseup
+    8) click 
+	*/
+	
 	// setup input handlers.
 	// compatibility for touch devices is taken into account
 	var self = this;
@@ -179,7 +195,6 @@ JSC3D.Viewer = function(canvas, parameters) {
 		this.canvas.addEventListener('mousedown', function(e){self.mouseDownHandler(e);}, false);
 		this.canvas.addEventListener('mouseup', function(e){self.mouseUpHandler(e);}, false);
 		this.canvas.addEventListener('mousemove', function(e){self.mouseMoveHandler(e);}, false);
-		this.canvas.addEventListener('onwheel' in document ? 'wheel' : 'onmousewheel' in document ? 'mousewheel' : 'DOMMouseScroll', function(e){self.mouseWheelHandler(e);});
 		document.addEventListener('keydown', function(e){self.keyDownHandler(e);}, false);
 		document.addEventListener('keyup', function(e){self.keyUpHandler(e);}, false);
 	}
@@ -190,7 +205,12 @@ JSC3D.Viewer = function(canvas, parameters) {
 		this.canvas.addEventListener('touchstart', function(e){self.touchStartHandler(e);}, false);
 		this.canvas.addEventListener('touchend', function(e){self.touchEndHandler(e);}, false);
 		this.canvas.addEventListener('touchmove', function(e){self.touchMoveHandler(e);}, false);
+		/* Modern all-in-one touch & tablet w. kb */
+		this.canvas.addEventListener('touchcancel', function(e){self.touchCancelHandler(e);}, false);
+		this.canvas.addEventListener('touchleave', function(e){self.touchCancelHandler(e);}, false);
 	}
+	/* Modern all-in-one touch & tablet w. kb */
+	this.canvas.addEventListener('onwheel' in document ? 'wheel' : 'onmousewheel' in document ? 'mousewheel' : 'DOMMouseScroll', function(e){self.mouseWheelHandler(e);});	
 };
 
 /**
@@ -218,6 +238,16 @@ JSC3D.Viewer = function(canvas, parameters) {
  */
 JSC3D.Viewer.prototype.setParameter = function(name, value) {
 	this.params[name] = value;
+};
+
+/**
+	Bulk set initial parameters 
+ */
+JSC3D.Viewer.prototype.setParameters = function(params) {
+	for (var name in params) {
+		var value = params[name];
+		this.params[name] = value;
+	}
 };
 
 /**
@@ -328,6 +358,11 @@ JSC3D.Viewer.prototype.init = function() {
 	this.generateBackground();
 	this.drawBackground();
 
+	/* Scene Rotation */
+	if (!this.isAutoUpdateOn && this.autoRotateSpeed != 0) 
+		if(JSC3D.console)
+			JSC3D.console.logWarning('Autorotate need to have AutoUpdate switched on.');
+	
 	// wake up update routine per 30 milliseconds
 	var self = this;
 	
@@ -350,7 +385,10 @@ JSC3D.Viewer.prototype.init = function() {
 		self.doUpdate();
 		if(self.ontick != null && (typeof self.ontick) == 'function')
 			self.ontick();
-		setTimeout(tick, delay);
+		
+		if (self.isAutoUpdateOn) 
+			setTimeout(tick, delay);
+		
 	}) ();
 	/* FPS --- */
 
@@ -376,6 +414,9 @@ JSC3D.Viewer.prototype.update = function(repaintOnly) {
 		this.needRepaint = true;
 	else
 		this.needUpdate = true;
+	
+	if (!this.isAutoUpdateOn) 
+		this.doUpdate();
 };
 
 /**
@@ -463,15 +504,30 @@ JSC3D.Viewer.prototype.rotateAboutZAxis = function(rotZ) { /* Scene Rotation */
 	}
 }
 
-JSC3D.Viewer.prototype.rotateScene = function(angle) { /* Scene Rotation */
-	if (!!angle) {
-		angle %= 360;			
+JSC3D.Viewer.prototype.rotateScene = function(degY) { /* Scene Rotation */
+	if (!!degY) {
+		degY %= 360;
 		var degX = this.initRotX, degZ = this.initRotZ;
 		this.rotMatrix.rotateAboutXAxis(-degX);
 		this.rotMatrix.rotateAboutZAxis(-degZ);
-		this.rotMatrix.rotateAboutYAxis(angle);
+		this.rotMatrix.rotateAboutYAxis(degY);
 		this.rotMatrix.rotateAboutZAxis(degZ);
 		this.rotMatrix.rotateAboutXAxis(degX);
+	}
+	this.sceneRotation += degY;
+	switch (true) {
+		case (this.sceneRotation > 179):
+			this.sceneRotation -= 360;
+			break;
+		case (this.sceneRotation < -179):
+			this.sceneRotation += 360;
+			break;
+	}
+	this.calcRotation(); /* Scene Rotation */
+	
+	if(this.onscenerotation != null && (typeof this.onscenerotation) == 'function') {
+		var self = this;
+		self.onscenerotation(self.sceneRotation);
 	}
 }
 
@@ -479,6 +535,7 @@ JSC3D.Viewer.prototype.autoRotateScene = function() { /* AutoRotation */
 	/* TODO: enhance with ease-in-out */
 	if (this.autoRotateSpeed != 0) {
 		this.rotateScene(this.autoRotateSpeed);
+		this.needUpdate = true;
 	}
 }
 /**
@@ -723,6 +780,7 @@ JSC3D.Viewer.prototype.resetScene = function() {
 	this.currentMesh = null; /* Selected mesh */
 	this.currentGroupName = ''; /* Selected mesh group name */
 	this.rotMatrix.identity();
+	this.sceneRotation = 0; /* Scene Rotation */
 	this.rotateAboutXAxis(this.initRotX); /* Scene Rotation */
 	this.rotateAboutYAxis(this.initRotY); /* Scene Rotation */
 	this.rotateAboutZAxis(this.initRotZ); /* Scene Rotation */
@@ -802,8 +860,6 @@ JSC3D.Viewer.prototype.pick = function(clientX, clientY) {
  */
 JSC3D.Viewer.prototype.doUpdate = function() {
 	this.autoRotateScene(); /* AutoRotation */
-	if (this.isAutoUpdateOn) 
-		this.needUpdate = true;
 	
 	if(this.needUpdate || this.needRepaint) {
 		if(this.beforeupdate != null && (typeof this.beforeupdate) == 'function')
@@ -825,8 +881,6 @@ JSC3D.Viewer.prototype.doUpdate = function() {
 			this.drawBackground();
 		}
 
-		this.calcRotation(); /* Scene Rotation */
-		
 		// clear dirty flags
 		this.needRepaint = false;
 		this.needUpdate = false;
@@ -1105,6 +1159,29 @@ JSC3D.Viewer.prototype.touchMoveHandler = function(e) {
 	}
 };
 
+/* Modern all-in-one touch & tablet w. kb */
+JSC3D.Viewer.prototype.touchCancelHandler = function(e) {
+	if(!this.isLoaded)
+		return;
+
+	if(e.touches.length > 0) {
+
+
+		e.preventDefault();
+		e.stopPropagation();
+
+		if(!this.isDefaultInputHandlerEnabled)
+			return;
+
+		this.buttonStates[0] = false;
+			
+		this.mouseDownX = -1;
+		this.mouseDownY = -1;
+
+		this.update();
+	}
+};
+
 /**
 	The keyDown event handling routine.
 	@private
@@ -1278,6 +1355,7 @@ JSC3D.Viewer.prototype.resize = function() {
 		}
 		this.generateBackground();
 		this.needUpdate = true;
+		this.doUpdate();
 	}
 };
 
@@ -1399,6 +1477,7 @@ JSC3D.Viewer.prototype.setupScene = function(scene) {
 	}
 
 	this.rotMatrix.identity();
+	this.sceneRotation = 0; /* Scene Rotation */
 	this.rotateAboutXAxis(this.initRotX); /* Scene Rotation */
 	this.rotateAboutYAxis(this.initRotY); /* Scene Rotation */
 	this.rotateAboutZAxis(this.initRotZ); /* Scene Rotation */
@@ -3717,6 +3796,7 @@ JSC3D.Viewer.prototype.initRotX = 0;
 JSC3D.Viewer.prototype.initRotY = 0;
 JSC3D.Viewer.prototype.initRotZ = 0;
 JSC3D.Viewer.prototype.initSceneRotation = 0; /* Scene Rotation */
+JSC3D.Viewer.prototype.sceneRotation = 0; /* Scene Rotation */
 JSC3D.Viewer.prototype.zoomFactor = 1;
 JSC3D.Viewer.prototype.panning = [0, 0];
 JSC3D.Viewer.prototype.rotation = [0, 0, 0]; /* Scene Rotation */
@@ -3791,6 +3871,7 @@ JSC3D.Viewer.prototype.afterupdate = null;
 JSC3D.Viewer.prototype.mouseUsage = 'default';
 JSC3D.Viewer.prototype.isDefaultInputHandlerEnabled = false;
 JSC3D.Viewer.prototype.isSceneRotationEnabled = false; /* Scene Rotation */
+JSC3D.Viewer.prototype.onscenerotation = null; /* Scene Rotation */
 JSC3D.Viewer.prototype.ontick = null; /* FPS */
 
 /**
@@ -5612,8 +5693,29 @@ JSC3D.Util = {
 		for(var i=0; i<arr.length-65536; i+=65536)
 			str += String.fromCharCode.apply(null, arr.slice(i, i+65536));
 		return str + String.fromCharCode.apply(null, arr.slice(i));
+	},
+	
+	/* Credits: https://github.com/rhysbrettbowen/debounce */
+	debounce: function(func, wait) {
+		var timeout, args, context, timestamp;
+		return function() {
+			context = this;
+			args = [].slice.call(arguments, 0);
+			timestamp = new Date();
+			var later = function() {
+				var last = (new Date()) - timestamp;
+				if (last < wait) {
+					timeout = setTimeout(later, wait - last);
+				} else {
+					timeout = null;
+					func.apply(context, args);
+				}
+			};
+			if (!timeout) {
+				timeout = setTimeout(later, wait);
+			}
+		}
 	}
-
 };
 
 
