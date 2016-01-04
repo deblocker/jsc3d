@@ -43,15 +43,49 @@ var JSC3D = JSC3D || {};
  * This class implements an optional WebGL render back-end for {JSC3D.Viewer}. If enabled, it takes 
  * place of {JSC3D.Viewer}'s default software rendering module and provides high performance rendering.
  */
+ 
+function throwOnGLError(err, funcName, args) {
+	if(JSC3D.console)
+		JSC3D.console.logError(WebGLDebugUtils.glEnumToString(err) + ' in : ' + funcName);
+};
+ 
+function logGLCall(functionName, args) {   
+	if(JSC3D.console)
+		JSC3D.console.logInfo('gl.' + functionName + '(' + WebGLDebugUtils.glFunctionArgsToString(functionName, args) + ')');
+} 
+
+function validateNoneOfTheArgsAreUndefined(functionName, args) {
+	for (var ii = 0; ii < args.length; ++ii) {
+		if (args[ii] === undefined) {
+			if(JSC3D.console)
+				JSC3D.console.logError('undefined passed to gl.' + functionName + '(' + WebGLDebugUtils.glFunctionArgsToString(functionName, args) + ')');
+		}
+	}
+} 
+
+function logAndValidate(functionName, args) {
+	//logGLCall(functionName, args);
+	validateNoneOfTheArgsAreUndefined(functionName, args);
+}
+
 JSC3D.WebGLRenderBackend = function(canvas, releaseLocalBuffers) {
 	this.canvas = canvas;
 	// IE11 only has a partial implementation of WebGL API, thus some special treatments are required 
 	// to avoid usage of unsupported methods and properties.
 	this.isIE11 = (JSC3D.PlatformInfo.browser == 'ie') && (parseInt(JSC3D.PlatformInfo.version) >= 11);
 	this.gl = canvas.getContext('experimental-webgl', {/*antialias: false,*/ preserveDrawingBuffer: true/*this is necessary since we need to read back pixels for picking*/}) || canvas.getContext('webgl');
-	if(!this.gl)
+	if(!this.gl) {
+		if(JSC3D.console)
+			JSC3D.console.logError('WebGLRenderBackend constructor failed: Cannot get WebGL context!');
 		throw 'JSC3D.WebGLRenderBackend constructor failed: Cannot get WebGL context!';
+	}
+	
+	/* Debug */
+	if (typeof WebGLDebugUtils != 'undefined')
+		this.gl = WebGLDebugUtils.makeDebugContext(this.gl, throwOnGLError, logAndValidate);
+	
 	this.definition = 'standard';
+	this.isLightingOn = false; /* Lighting */
 	this.bkgColors = [0, 0];
 	this.bkgTexture = null;
 	this.frameWidth = this.canvas.width || 0; /* Viewer Resize */
@@ -62,29 +96,29 @@ JSC3D.WebGLRenderBackend = function(canvas, releaseLocalBuffers) {
 	this.releaseLocalBuffers = releaseLocalBuffers || false;
 
 	this.screen_vs =	'#ifdef GL_ES \n' + 
-						'	precision mediump float; \n' + 
-						'#endif	\n' + 
+						'  precision mediump float; \n' + 
+						'#endif \n' + 
 						'\n' + 
 						'attribute vec2 a_position; \n' + 
 						'varying vec2 v_texCoord; \n' + 
 						'\n' + 
 						'void main(void) { \n' + 
-						'	v_texCoord = vec2(0.5, 0.5) * a_position + vec2(0.5, 0.5); \n' + 
-						'	gl_Position = vec4(a_position, 1.0, 1.0); \n' + 
+						'   v_texCoord = vec2(0.5, 0.5) * a_position + vec2(0.5, 0.5); \n' + 
+						'   gl_Position = vec4(a_position, 1.0, 1.0); \n' + 
 						'}';
 	this.screen_fs =	'#ifdef GL_ES \n' + 
-						'	precision mediump float; \n' + 
-						'#endif	\n' + 
+						'  precision mediump float; \n' + 
+						'#endif \n' + 
 						'\n' + 
 						'uniform sampler2D s_screenTexture; \n' + 
 						'varying vec2 v_texCoord; \n' + 
 						'\n' + 
 						'void main(void) { \n' + 
-						'	gl_FragColor = texture2D(s_screenTexture, v_texCoord); \n' + 
+						'  gl_FragColor = texture2D(s_screenTexture, v_texCoord); \n' + 
 						'}';
 	this.gradient_background_vs =	'#ifdef GL_ES \n' + 
-									'	precision mediump float; \n' + 
-									'#endif	\n' + 
+									'  precision mediump float; \n' + 
+									'#endif \n' + 
 									'\n' + 
 									'uniform vec3 u_color1; \n' + 
 									'uniform vec3 u_color2; \n' + 
@@ -92,106 +126,147 @@ JSC3D.WebGLRenderBackend = function(canvas, releaseLocalBuffers) {
 									'varying vec4 v_color; \n' + 
 									'\n' + 
 									'void main(void) { \n' + 
-									'	v_color = vec4(a_position.y > 0.0 ? u_color1 : u_color2, 1.0); \n' + 
-									'	gl_Position = vec4(a_position, 1.0, 1.0); \n' + 
+									'  v_color = vec4(a_position.y > 0.0 ? u_color1 : u_color2, 1.0); \n' + 
+									'  gl_Position = vec4(a_position, 1.0, 1.0); \n' + 
 									'}';
 	this.gradient_background_fs =	'#ifdef GL_ES \n' + 
-									'	precision mediump float; \n' + 
-									'#endif	\n' + 
+									'  precision mediump float; \n' + 
+									'#endif \n' + 
 									'\n' + 
 									'varying vec4 v_color; \n' + 
 									'\n' + 
 									'void main(void) { \n' + 
-									'	gl_FragColor = v_color;' + 
+									'  gl_FragColor = v_color;' + 
 									'}';
 	this.frame_vs =	'#ifdef GL_ES \n' + 
-					'	precision mediump float; \n' + 
-					'#endif	\n' + 
+					'  precision mediump float; \n' + 
+					'#endif \n' + 
 					'\n' + 
 					'uniform bool u_isPoint; \n' + 
 					'uniform mat4 u_transformMatrix; \n' + 
 					'attribute vec3 a_position; \n' + 
 					'\n' + 
 					'void main(void) { \n' + 
-					'	if(u_isPoint) { \n' + 
-					'		gl_PointSize = 2.0; \n' + 
-					'	} \n' + 
-					'	gl_Position = u_transformMatrix * vec4(a_position, 1.0); \n' + 
+					'  if(u_isPoint) { \n' + 
+					'    gl_PointSize = 2.0; \n' + 
+					'  } \n' + 
+					'  gl_Position = u_transformMatrix * vec4(a_position, 1.0); \n' + 
 					'}';
 	this.frame_fs =	'#ifdef GL_ES \n' + 
-					'	precision mediump float; \n' + 
-					'#endif	\n' + 
+					'  precision mediump float; \n' + 
+					'#endif \n' + 
 					'\n' + 
 					'uniform vec3 u_materialColor; \n' + 
 					'\n' + 
 					'void main(void) { \n' + 
-					'	gl_FragColor = vec4(u_materialColor, 1.0); \n' + 
+					'  gl_FragColor = vec4(u_materialColor, 1.0); \n' + 
 					'}';
 	this.solid_vs = '#ifdef GL_ES \n' + 
-					'	precision mediump float; \n' + 
-					'#endif	\n' + 
+					'  precision mediump float; \n' + 
+					'#endif \n' + 
 					'\n' + 
 					'uniform bool u_isLit; \n' + 
-					'uniform bool u_isCast; \n' + 
+					'uniform bool u_isEnvCast; \n' + 
 					'uniform bool u_hasTexture; \n' + 
 					'uniform mat3 u_rotationMatrix; \n' + 
-					'uniform mat4 u_transformMatrix; \n' + 
+					'uniform mat4 u_transformMatrix; \n' +
 					'attribute vec3 a_position; \n' + 
 					'attribute vec3 a_normal; \n' + 
 					'attribute vec2 a_texCoord; \n' + 
 					'varying vec3 v_normal; \n' + 
 					'varying vec2 v_texCoord; \n' + 
+					'varying vec3 v_viewCoords; \n' + /* Lighting */
 					'\n' + 
 					'void main(void) { \n' + 
-					'	if(u_isLit) { \n' + 
-					'		v_normal = u_rotationMatrix * a_normal; \n' + 
-					'	} \n' + 
-					'	if(u_hasTexture) { \n' + 
-					'		v_texCoord = a_texCoord; \n' + 
-					'	} \n' + 
-					'	gl_Position = u_transformMatrix * vec4(a_position, 1.0); \n' + 
+					'  vec4 tcoords = u_transformMatrix * vec4(a_position, 1.0); \n' + 
+					'  v_viewCoords = tcoords.xyz; \n' + /* Lighting */
+					'  if(u_isLit) { \n' + 
+					'    v_normal = u_rotationMatrix * a_normal; \n' + 
+					'  } \n' + 
+					'  if(u_hasTexture) { \n' + 
+					'    v_texCoord = a_texCoord; \n' + 
+					'  } \n' + 
+					'  gl_Position = tcoords; \n' + 
 					'}';
 	this.solid_fs = '#ifdef GL_ES \n' + 
-					'	precision mediump float; \n' + 
-					'#endif	\n' + 
+					'  precision mediump float; \n' + 
+					'#endif \n' + 
 					'\n' + 
-					'uniform bool  u_isLit; \n' + 
-					'uniform bool  u_isCast; \n' + 
-					'uniform bool  u_hasTexture; \n' + 
+					'struct materialProperties { \n' + /* Lighting */
+					'  vec3 ambient; \n' + 
+					'  vec3 diffuse; \n' + 
+					'  vec3 specular; \n' + 
+					'  float ka; \n' + 
+					'  float kd; \n' + 
+					'  float ks; \n' + 
+					'  float shininess; \n' + 
+					'}; \n' + 
+					'struct lightProperties { \n' + /* Lighting */
+					'  vec4 position; \n' + 
+					'  vec3 ambient; \n' + 
+					'  vec3 diffuse; \n' +
+					'  bool enabled; \n' + 
+					'}; \n' +
+					'uniform bool u_isLit; \n' + 
+					'uniform bool u_isLitCast; \n' + /* Lighting */
+					'uniform vec3 u_globalAmbient; \n' + /* Lighting */
+					'uniform bool u_isEnvCast; \n' + 
+					'uniform bool u_hasTexture; \n' + 
 					'uniform float u_opacity; \n' + 
+					'uniform materialProperties material; \n' + /* Lighting */
+					'uniform lightProperties light[10]; \n' + /* Lighting */
 					'uniform sampler2D s_palette; \n' + 
 					'uniform sampler2D s_texture; \n' + 
 					'uniform sampler2D s_sphereTexture; \n' + 
 					'varying vec3 v_normal; \n' + 
 					'varying vec2 v_texCoord; \n' + 
+					'varying vec3 v_viewCoords; \n' + /* position in viewing coordinates */
+					'\n' + 
+					'vec3 lighting(vec3 vertex, vec3 V, vec3 N) { \n' +
+					'  vec3 color = material.ambient + u_globalAmbient; \n' + 
+					'  for (int i = 0; i < 6; i++) { \n' +
+					'    if (light[i].enabled) { \n' +
+					'      vec3 L = normalize(light[i].position.xyz - vertex); \n' +
+					'      float lambertian = max(dot(N, L), 0.0); \n' + /* Lambert's cosine law */
+					'      float specular = 0.0; \n' +
+					'      if(lambertian > 0.0) { \n' +
+					'        vec3 R = reflect(-L, N); \n' + /* Reflected light vector */
+					'        float specAngle = max(dot(R, V), 0.0); \n' + /* Compute the specular term */
+					'        specular = pow(specAngle, material.shininess); \n' +
+					'      } \n' +
+					'      color += material.ka * material.ambient * light[i].ambient + material.kd * lambertian * material.diffuse * light[i].diffuse + material.ks * specular * material.specular; \n' +
+					'    } \n' +
+					'  } \n' +
+					'  return color; \n' +
+					'} \n' +
 					'\n' + 
 					'void main(void) { \n' + 
-					'	vec4 materialColor = u_isLit ? vec4(texture2D(s_palette, vec2(abs(v_normal.z), 0.0)).rgb, u_opacity) : vec4(1.0, 1.0, 1.0, u_opacity); \n' + 
-					'	if(u_isCast) { \n' + 
-					'		gl_FragColor = materialColor * texture2D(s_sphereTexture, vec2(0.5, -0.5) * v_normal.xy + vec2(0.5, 0.5)); \n' + 
-					'	} \n' + 
-					'	else { \n' + 
-					'		gl_FragColor = u_hasTexture ? (materialColor * texture2D(s_texture, v_texCoord)) : materialColor; \n' + 
-					'	} \n' + 
+					'  vec4 materialColor = u_isLit ? u_isLitCast ? vec4(lighting(v_viewCoords, normalize(-v_viewCoords),v_normal), u_opacity) : vec4(texture2D(s_palette, vec2(abs(v_normal.z), 0.0)).rgb, u_opacity) : vec4(1.0, 1.0, 1.0, u_opacity); \n' + 
+					'  if(u_isEnvCast) { \n' + 
+					'    gl_FragColor = materialColor * texture2D(s_sphereTexture, vec2(0.5, -0.5) * v_normal.xy + vec2(0.5, 0.5)); \n' + 
+					'  } \n' + 
+					'  else { \n' + 
+					'    gl_FragColor = u_hasTexture ? (materialColor * texture2D(s_texture, v_texCoord)) : materialColor; \n' + 
+					'  } \n' + 
 					'}';
 	this.picking_vs =	'#ifdef GL_ES \n' + 
-						'	precision mediump float; \n' + 
-						'#endif	\n' + 
+						'  precision mediump float; \n' + 
+						'#endif \n' + 
 						'\n' + 
 						'uniform mat4 u_transformMatrix; \n' + 
 						'attribute vec3 a_position; \n' + 
 						'\n' + 
 						'void main(void) { \n' + 
-						'	gl_Position = u_transformMatrix * vec4(a_position, 1.0); \n' + 
+						'  gl_Position = u_transformMatrix * vec4(a_position, 1.0); \n' + 
 						'}'; 
 	this.picking_fs =	'#ifdef GL_ES \n' + 
-						'	precision mediump float; \n' + 
-						'#endif	\n' + 
+						'  precision mediump float; \n' + 
+						'#endif \n' + 
 						'\n' + 
 						'uniform vec3 u_pickingId; \n' + 
 						'\n' + 
 						'void main(void) { \n' + 
-						'	gl_FragColor = vec4(u_pickingId, 1.0); \n' + 
+						'  gl_FragColor = vec4(u_pickingId, 1.0); \n' + 
 						'}';
 
 	function createProgram(gl, vSrc, fSrc) {
@@ -284,7 +359,7 @@ JSC3D.WebGLRenderBackend.prototype.setBackgroundImage = function(img) {
 /**
  * Begin to render a new frame.
  */
-JSC3D.WebGLRenderBackend.prototype.beginFrame = function(definition, hasBackground) {
+JSC3D.WebGLRenderBackend.prototype.beginFrame = function(definition, hasBackground, frameW, frameH) {
 	var gl = this.gl;
 
 	function prepareFB(gl, fbo, w, h) {
@@ -321,6 +396,23 @@ JSC3D.WebGLRenderBackend.prototype.beginFrame = function(definition, hasBackgrou
 		gl.deleteFramebuffer(fbo);
 	}
 
+
+	/* Viewer Resize +++ */
+	if (frameW != this.frameWidth || frameH != this.frameHeight) {
+		if(this.backFB) {
+			destroyFB(gl, this.backFB);
+			this.backFB = null;
+		}
+		if(this.pickingFB) {
+			destroyFB(gl, this.pickingFB);
+			this.pickingFB = null;
+			
+		}
+	}
+	this.frameWidth = frameW;
+	this.frameHeight = frameH;
+	/* Viewer Resize --- */
+	
 	// create the picking frame-buffer
 	if(!this.pickingFB) {
 		this.pickingFB = gl.createFramebuffer();
@@ -328,7 +420,6 @@ JSC3D.WebGLRenderBackend.prototype.beginFrame = function(definition, hasBackgrou
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 	}
 
-	var oldFrameWidth = this.frameWidth, oldFrameHeight = this.frameHeight; /* Viewer Resize */
 	var frameWidth  = this.canvas.width;
 	var frameHeight = this.canvas.height;
 	switch(definition) {
@@ -344,21 +435,12 @@ JSC3D.WebGLRenderBackend.prototype.beginFrame = function(definition, hasBackgrou
 	default:
 		break;
 	}
-
-	/* Viewer Resize +++ */
-	if (frameWidth != oldFrameWidth || frameHeight != oldFrameHeight) {
-		if(this.backFB) {
-			destroyFB(gl, this.backFB);
-			this.backFB = null;
-		}
-	}
-	/* Viewer Resize --- */
 	
 	/*
 	 * For definitions other than 'standard', drawings will be generated in the back frame-buffer
 	 * and then resampled to be applied on canvas.
 	 */
-	if(definition != 'standard') { /* Viewer Resize */
+	if(frameWidth != this.canvas.width || frameHeight != this.canvas.height) {
 		if(!this.backFB) {
 			// create the back frame-buffer and bind it as render target
 			this.backFB = gl.createFramebuffer();
@@ -381,9 +463,6 @@ JSC3D.WebGLRenderBackend.prototype.beginFrame = function(definition, hasBackgrou
 	}
 
 	this.definition = definition;
-	
-	this.frameWidth = frameWidth; /* Viewer Resize */
-	this.frameHeight = frameHeight; /* Viewer Resize */
 	
 	gl.viewport(0, 0, frameWidth, frameHeight);
 
@@ -478,10 +557,19 @@ JSC3D.WebGLRenderBackend.prototype.endFrame = function() {
 	gl.flush();
 };
 
+/* Viewer Resize */
+JSC3D.WebGLRenderBackend.prototype.resizeFrame = function(w, h) {
+	if (w != this.frameWidth || h != this.frameHeight) {
+		this.endFrame();
+		this.canvas.width = w;
+		this.canvas.height = h;
+	}
+};
+
 /**
  * Do render a new frame.
  */
-JSC3D.WebGLRenderBackend.prototype.render = function(renderList, transformMatrix, normalMatrix, renderMode, defaultMaterial, sphereMap, isCullingDisabled) {
+JSC3D.WebGLRenderBackend.prototype.render = function(renderList, lightList, sceneTransMat, sceneNormMat, transformMatrix, normalMatrix, renderMode, defaultMaterial, sphereMap, isCullingDisabled) {
 	var gl = this.gl;
 
 	var transformMat4Flattened = new Float32Array([
@@ -497,6 +585,19 @@ JSC3D.WebGLRenderBackend.prototype.render = function(renderList, transformMatrix
 		normalMatrix.m02, normalMatrix.m12, normalMatrix.m22
 	]);
 
+	/* Lighting */
+	var sceneTransMat4Flattened = new Float32Array([
+		sceneTransMat.m00, sceneTransMat.m10, sceneTransMat.m20, 0, 
+		sceneTransMat.m01, sceneTransMat.m11, sceneTransMat.m21, 0, 
+		sceneTransMat.m02, sceneTransMat.m12, sceneTransMat.m22, 0, 
+		sceneTransMat.m03, sceneTransMat.m13, sceneTransMat.m23, 1
+	]);
+	var sceneNormMat3Flattened = new Float32Array([
+		sceneNormMat.m00, sceneNormMat.m10, sceneNormMat.m20, 
+		sceneNormMat.m01, sceneNormMat.m11, sceneNormMat.m21, 
+		sceneNormMat.m02, sceneNormMat.m12, sceneNormMat.m22
+	]);
+	
 	function sortRenderList(rlist) {
 		var opaque = [], transparent = [];
 
@@ -531,12 +632,13 @@ JSC3D.WebGLRenderBackend.prototype.render = function(renderList, transformMatrix
 	renderList = sortRenderList(renderList);
 
 	// render the color pass
-	this.renderColorPass(renderList, transformMat4Flattened, normalMat3Flattened, renderMode, defaultMaterial, sphereMap, isCullingDisabled);
+	this.renderColorPass(renderList, lightList, sceneTransMat4Flattened, sceneNormMat3Flattened, transformMat4Flattened, normalMat3Flattened, renderMode, defaultMaterial, sphereMap, isCullingDisabled);
 
 	// render the picking pass
 	if(this.pickingFB) {
 		gl.bindFramebuffer(gl.FRAMEBUFFER, this.pickingFB);
-		this.renderPickingPass(renderList, transformMat4Flattened, defaultMaterial, isCullingDisabled);
+		/* Lighting */
+		this.renderPickingPass(renderList, sceneTransMat4Flattened, transformMat4Flattened, defaultMaterial, isCullingDisabled);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 	}
 };
@@ -563,7 +665,7 @@ JSC3D.WebGLRenderBackend.prototype.pick = function(x, y) {
  * Render a given list of meshes, generating colored stuff of this frame.
  * @private
  */
-JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transformMat4, normalMat3, renderMode, defaultMaterial, sphereMap, isCullingDisabled) {
+JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, lightList, sceneTransMat4, sceneNormMat3, transformMat4, normalMat3, renderMode, defaultMaterial, sphereMap, isCullingDisabled) {
 	if(sphereMap && sphereMap.hasData() && !sphereMap.compiled)
 		this.compileTexture(sphereMap);
 
@@ -577,7 +679,13 @@ JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transf
 	var curProgram = null;
 	var isBlendEnabled = false;
 
-	for(var i=0; i<renderList.length; i++) {
+	/* Lighting */
+	for(var j = 0, k=lightList.length; j < k; j++) {
+		var light= lightList[j];
+		this.compileLight(light);
+	}
+	
+	for(var i=0,l=renderList.length; i<l; i++) {
 		var mesh = renderList[i];
 		if(mesh.isTrivial() || !mesh.visible)
 			continue;
@@ -611,7 +719,9 @@ JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transf
 			isBlendEnabled = isTransparent;
 		}
 
-		var environmentCast = (mesh.material) ? mesh.material.isEnvironmentCast : mesh.isEnvironmentCast; /* EnvironmentCast of Material */
+		var matEnvCast = (mesh.material) ? mesh.material.isEnvironmentCast : false; /* EnvironmentCast of Material */
+		var texEnvCast = (mesh.texture) ? mesh.texture.isEnvironmentCast : false; /* EnvironmentCast of Texture */
+		var environmentCast = matEnvCast || texEnvCast;
 		var isSphereMapped = environmentCast && (sphereMap != null);
 
 		// resolve current render mode and then choose a right program
@@ -643,6 +753,12 @@ JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transf
 			break;
 		}
 
+		/* Lighting */
+		if (mesh.isPositionFixed) {
+			normalMat3 = sceneNormMat3;
+			transformMat4 = sceneTransMat4;
+		}
+		
 		// need to recompile the mesh?
 		if(!mesh.compiled || mesh.compiled.remderMode != rmode)
 			this.compileMesh(mesh, rmode);
@@ -652,6 +768,27 @@ JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transf
 			curProgram = program;
 		}
 
+		/* Lighting +++ */
+		if(typeof program.uniforms['u_isLitCast'] != 'undefined') {
+			gl.uniform1i(program.uniforms['u_isLitCast'], material.compiled.isLitCast);
+			gl.uniform3f(program.uniforms['u_globalAmbient'], .1,.1,.1); /* Sync intensity with palette */
+			for(var j = 0, k=lightList.length; j < k; j++) {
+				var light= lightList[j];
+				gl.uniform1i(program.uniforms['light['+j+'].enabled'], light.enabled); 
+				gl.uniform3fv(program.uniforms['light['+j+'].ambient'], light.compiled.ambient);
+				gl.uniform3fv(program.uniforms['light['+j+'].diffuse'], light.compiled.diffuse);
+				gl.uniform4fv(program.uniforms['light['+j+'].position'], light.compiled.position);
+			}			
+			gl.uniform3fv(program.uniforms['material.ambient'], material.compiled.ambColor);
+			gl.uniform3fv(program.uniforms['material.diffuse'], material.compiled.diffColor);
+			gl.uniform3fv(program.uniforms['material.specular'],material.compiled.specColor); 
+			gl.uniform1f(program.uniforms['material.ka'], material.ambientReflection);
+			gl.uniform1f(program.uniforms['material.kd'], material.diffuseReflection);
+			gl.uniform1f(program.uniforms['material.ks'], material.specularReflection);
+			gl.uniform1f(program.uniforms['material.shininess'], material.shininess);
+		}		
+		/* Lighting --- */
+		
 		// draw the mesh with the chosen render mode
 		switch(rmode) {
 		case 'point':
@@ -675,7 +812,7 @@ JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transf
 		case 'flat':
 		case 'smooth':
 			gl.uniform1i(program.uniforms['u_isLit'], true);
-			gl.uniform1i(program.uniforms['u_isCast'], false);
+			gl.uniform1i(program.uniforms['u_isEnvCast'], false);
 			gl.uniform1i(program.uniforms['u_hasTexture'], false);
 			gl.uniform1f(program.uniforms['u_opacity'], opacity);
 			gl.uniformMatrix3fv(program.uniforms['u_rotationMatrix'], false, normalMat3);
@@ -694,7 +831,7 @@ JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transf
 			break;
 		case 'texture':
 			gl.uniform1i(program.uniforms['u_isLit'], false);
-			gl.uniform1i(program.uniforms['u_isCast'], false);
+			gl.uniform1i(program.uniforms['u_isEnvCast'], false);
 			gl.uniform1i(program.uniforms['u_hasTexture'], true);
 			gl.uniform1f(program.uniforms['u_opacity'], opacity);
 			gl.uniformMatrix3fv(program.uniforms['u_rotationMatrix'], false, normalMat3);
@@ -713,7 +850,7 @@ JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transf
 			break;
 		case 'textureflat':
 			gl.uniform1i(program.uniforms['u_isLit'], true);
-			gl.uniform1i(program.uniforms['u_isCast'], false);
+			gl.uniform1i(program.uniforms['u_isEnvCast'], false);
 			gl.uniform1i(program.uniforms['u_hasTexture'], true);
 			gl.uniform1f(program.uniforms['u_opacity'], opacity);
 			gl.uniformMatrix3fv(program.uniforms['u_rotationMatrix'], false, normalMat3);
@@ -737,7 +874,7 @@ JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transf
 			break;
 		case 'texturesmooth':
 			gl.uniform1i(program.uniforms['u_isLit'], true);
-			gl.uniform1i(program.uniforms['u_isCast'], isSphereMapped);
+			gl.uniform1i(program.uniforms['u_isEnvCast'], isSphereMapped);
 			gl.uniform1i(program.uniforms['u_hasTexture'], !isSphereMapped);
 			gl.uniform1f(program.uniforms['u_opacity'], opacity);
 			gl.uniformMatrix3fv(program.uniforms['u_rotationMatrix'], false, normalMat3);
@@ -780,7 +917,7 @@ JSC3D.WebGLRenderBackend.prototype.renderColorPass = function(renderList, transf
  * Fill the picking buffer of this frame.
  * @private
  */
-JSC3D.WebGLRenderBackend.prototype.renderPickingPass = function(renderList, transformMat4, defaultMaterial, isCullingDisabled) {
+JSC3D.WebGLRenderBackend.prototype.renderPickingPass = function(renderList, sceneTransMat4, transformMat4, defaultMaterial, isCullingDisabled) {
 	var gl = this.gl;
 
 	gl.disable(gl.BLEND);
@@ -809,6 +946,11 @@ JSC3D.WebGLRenderBackend.prototype.renderPickingPass = function(renderList, tran
 		else
 			gl.enable(gl.CULL_FACE);
 
+		/* Lighting */
+		if (mesh.isPositionFixed) {
+			transformMat4 = sceneTransMat4;
+		}
+		
 		gl.uniformMatrix4fv(this.programs.picking.uniforms['u_transformMatrix'], false, transformMat4);
 		gl.uniform3fv(this.programs.picking.uniforms['u_pickingId'], mesh.compiled.pickingId);
 		gl.enableVertexAttribArray(this.programs.picking.attributes['a_position']);
@@ -1152,9 +1294,12 @@ JSC3D.WebGLRenderBackend.prototype.compileMaterial = function(material) {
 	var gl = this.gl;
 
 	material.compiled = {
-		diffColor: new Float32Array([(material.diffuseColor & 0xff0000) / 16777216, (material.diffuseColor & 0xff00) / 65536, (material.diffuseColor & 0xff) / 256])
+		/* Lighting */
+		ambColor: new Float32Array([(material.ambientColor & 0xff0000) / 16777216, (material.ambientColor & 0xff00) / 65536, (material.ambientColor & 0xff) / 256]),
+		diffColor: new Float32Array([(material.diffuseColor & 0xff0000) / 16777216, (material.diffuseColor & 0xff00) / 65536, (material.diffuseColor & 0xff) / 256]),
+		specColor: new Float32Array([(material.specularColor & 0xff0000) / 16777216, (material.specularColor & 0xff00) / 65536, (material.specularColor & 0xff) / 256])
 	};
-
+	
 	var rgba = new Uint8Array((new Uint32Array(material.getPalette())).buffer);
 	// the sequence should be converted from BGRA to RGBA by swapping each 1st and 3rd components
 	//TODO: this only works on Little-Endian platforms. We shall also take into account the case for Big-Endian.
@@ -1164,6 +1309,8 @@ JSC3D.WebGLRenderBackend.prototype.compileMaterial = function(material) {
 		rgba[i + 2] = tmp;
 	}
 
+	/* Lighting */
+	material.compiled.isLitCast = (this.isLightingOn) ? material.isLightingCast : false;
 	material.compiled.palette = gl.createTexture();
 	gl.bindTexture(gl.TEXTURE_2D, material.compiled.palette);
 	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
@@ -1216,3 +1363,19 @@ JSC3D.WebGLRenderBackend.prototype.compileTexture = function(texture, genMipmap)
 
 	return true;
 };
+
+/**
+ * Lighting
+ * Compile a light, generating the WebGL dependent stuff.
+ */
+JSC3D.WebGLRenderBackend.prototype.compileLight = function(light) {
+	// position.z == 0 for a directional light, and 1 for a positional light ???
+	light.compiled = {
+		diffuse: new Float32Array([(light.diffuseColor & 0xff0000) / 16777216, (light.diffuseColor & 0xff00) / 65536, (light.diffuseColor & 0xff) / 256]),
+		ambient: new Float32Array([(light.ambientColor & 0xff0000) / 16777216, (light.ambientColor & 0xff00) / 65536, (light.ambientColor & 0xff) / 256]),
+		position: new Float32Array([light.transformedPosition[0],light.transformedPosition[1],-light.transformedPosition[2],0])
+	};
+	return true;
+};
+
+JSC3D.WebGLRenderBackend.prototype.isLightingOn = false;

@@ -10,6 +10,8 @@ function onModelLoaded(scene) {
 		mesh.init();
 		viewer.scene.addChild(mesh);
 	}
+	if (!viewer.isAutoUpdateOn)
+		viewer.update();
 }
 
 function onViewerBeforeUpdate() {
@@ -27,44 +29,49 @@ function onViewerBeforeUpdate() {
 (function initalize() {
 	JSC3D.LoaderSelector.registerLoader('obj', JSC3D.ObjLoader);
 	
-	var isWebGL = JSC3D.PlatformInfo.supportWebGL ? true : false;
+	var isWebGL = JSC3D.PlatformInfo.supportWebGL;
 	var canvas = document.getElementById('cv');
+	var params = {
+		'InitRotationX': 22,
+		'InitRotationY': 0,
+		'InitRotationZ': 0,
+		'SceneRotation': 'on',
+		'InitSceneRotation': 60,
+		'AutoRotateSpeed': 1,
+		'EnableRotateX': true,
+		'EnableRotateY': true,
+		'AutoUpdate': 'on',
+		'BackgroundColor1': '#FFFFFF',
+		'BackgroundColor2': '#333333',
+		'Background': 'on',
+		'Definition': 'default',
+		'RenderMode': 'texturesmooth',
+		'CreaseAngle': '30',
+		'FaceCulling': 'off',
+		'MipMapping': isWebGL ? 'off' : 'on',
+		'Renderer': isWebGL ? 'webgl' : 'canvas'
+	};
 	viewer = new JSC3D.Viewer(canvas);
-	viewer.setParameter('InitRotationX', 22);
-	viewer.setParameter('InitRotationY', 0);
-	viewer.setParameter('InitRotationZ', 0);
-	viewer.setParameter('SceneRotation', 'on');
-	viewer.setParameter('InitSceneRotation', 60);
-	viewer.setParameter('AutoRotateSpeed', 1);
-	viewer.setParameter('EnableRotateX', true);
-	viewer.setParameter('EnableRotateY', true);
-	viewer.setParameter('AutoUpdate', 'on');
-	viewer.setParameter('ModelColor', '#AAAAAA');
-	viewer.setParameter('BackgroundColor1', '#FFFFFF')
-	viewer.setParameter('BackgroundColor2', '#333333');
-    viewer.setParameter('Background', 'on');
-	viewer.setParameter('Definition', 'default');
-	viewer.setParameter('RenderMode', 'texturesmooth');
-	viewer.setParameter('CreaseAngle', '30');
-	viewer.setParameter('FaceCulling', 'off');
-	viewer.setParameter('MipMapping', isWebGL ? 'off' : 'on');
-	viewer.setParameter('Renderer', isWebGL ? 'webgl' : 'canvas');
-	
+	viewer.setParameters(params);
 	viewer.beforeupdate = onViewerBeforeUpdate;
 	viewer.init();
 	
-	/* material name, ambient color, diffuse color, alpha, specular, environmentCast */
-	viewer.addMaterial('grey_mat', 0, 0x7A7B7A, 0, false, false);
-	viewer.addMaterial('yellow_mat', 0, 0xFEFB10, 0, false, false);
-	viewer.addMaterial('red_mat', 0, 0xF40000, 0, false, false);
-	viewer.addMaterial('blue_mat', 0, 0x0006F0, 0, false, false);
-	viewer.addMaterial('orange_mat', 0, 0xFF7901, 0, false, false);
-	viewer.addMaterial('green_mat', 0, 0x00CB00, 0, false, false);
-	viewer.addMaterial('cyan_mat', 0, 0x00E8E8, 0, false, false);
+	/* params: name, ambientColor, diffuseColor, specularColor, 
+					 ambientReflection, diffuseReflection, specularReflection, shininess, 
+					 transparency, environmentCast, lightingCast 
+	*/
+	viewer.addMaterial('grey_mat', 'undefined', 0x7A7B7A);
+	viewer.addMaterial('yellow_mat', 'undefined', 0xFEFB10);
+	viewer.addMaterial('red_mat', 'undefined', 0xF40000);
+	viewer.addMaterial('blue_mat', 'undefined', 0x0006F0);
+	viewer.addMaterial('orange_mat', 'undefined', 0xFF7901);
+	viewer.addMaterial('green_mat', 'undefined', 0x00CB00);
+	viewer.addMaterial('cyan_mat', 'undefined', 0x00E8E8);
 
 	if (viewer.params['SceneUrl'] == '') {
 		viewer.createScene(-50, 50, -50, 50, -50, 50);
-		viewer.scene.makeGroundPlane(0x0000ff, 'wireframe');
+		/* params: color, texture, renderMode */
+		viewer.scene.makeGroundPlane(0x0000ff, null, 'wireframe');
 	}
 	
 	loader = JSC3D.LoaderSelector.getLoader('obj');

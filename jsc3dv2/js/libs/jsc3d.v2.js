@@ -69,6 +69,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 			Renderer:			parameters.Renderer || '', 
 			AutoUpdate:			parameters.AutoUpdate || 'off',  /* FPS */
 			AutoRotateSpeed:	parameters.AutoRotateSpeed || 0, /* AutoRotation */
+			LightingMode:		parameters.LightingMode || 'standard',  /* Lighting */
 			LocalBuffers:		parameters.LocalBuffers || 'retain'
 		};
 	else
@@ -94,6 +95,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 			Renderer: '', 
 			AutoUpdate: 'off', /* FPS */
 			AutoRotateSpeed: 0, /* AutoRotation */
+			LightingMode: 'standard', /* Lighting */
 			LocalBuffers: 'retain'
 		};
 
@@ -126,6 +128,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.panning = [0, 0];
 	this.rotation = [0, 0, 0]; /* Scene Rotation */
 	this.fps = 0; /* FPS */
+	this.frameNumber = 0; /* FPS */
 	this.rotMatrix = new JSC3D.Matrix3x4;
 	this.transformMatrix = new JSC3D.Matrix3x4;
 	this.sceneUrl = '';
@@ -143,6 +146,8 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.sphereMapUrl = '';
 	this.isAutoUpdateOn = false; /* FPS */
 	this.autoRotateSpeed = 0; /* AutoRotation */
+	this.lightingMode = 'standard'; /* Lighting */
+	this.showLights = false; /* Lighting */
 	this.showProgressBar = true;
 	this.buttonStates = {};
 	this.keyStates = {};
@@ -195,6 +200,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 		this.canvas.addEventListener('mousedown', function(e){self.mouseDownHandler(e);}, false);
 		this.canvas.addEventListener('mouseup', function(e){self.mouseUpHandler(e);}, false);
 		this.canvas.addEventListener('mousemove', function(e){self.mouseMoveHandler(e);}, false);
+		//this.canvas.addEventListener('click', function(e){self.mouseClickHandler(e);}, false);
 		document.addEventListener('keydown', function(e){self.keyDownHandler(e);}, false);
 		document.addEventListener('keyup', function(e){self.keyUpHandler(e);}, false);
 	}
@@ -240,9 +246,6 @@ JSC3D.Viewer.prototype.setParameter = function(name, value) {
 	this.params[name] = value;
 };
 
-/**
-	Bulk set initial parameters 
- */
 JSC3D.Viewer.prototype.setParameters = function(params) {
 	for (var name in params) {
 		var value = params[name];
@@ -276,6 +279,7 @@ JSC3D.Viewer.prototype.init = function() {
 	this.releaseLocalBuffers = this.params['LocalBuffers'].toLowerCase() == 'release';
 	this.isSceneRotationEnabled = this.params['SceneRotation'].toLowerCase() == 'on'; /* Scene Rotation */
 	this.initSceneRotation = parseFloat(this.params['InitSceneRotation']); /* Scene Rotation */
+	this.lightingMode = this.params['LightingMode'].toLowerCase(); /* Lighting */
 	
 	/* FPS +++ */
 	if (this.definition == 'default')
@@ -292,6 +296,7 @@ JSC3D.Viewer.prototype.init = function() {
 	if(this.useWebGL && JSC3D.PlatformInfo.supportWebGL && JSC3D.WebGLRenderBackend) {
 		try {
 			this.webglBackend = new JSC3D.WebGLRenderBackend(this.canvas, this.releaseLocalBuffers);
+			this.webglBackend.isLightingOn = (this.lightingMode != 'standard'); /* Lighting */
 		} catch(e){}
 	}
 
@@ -344,7 +349,11 @@ JSC3D.Viewer.prototype.init = function() {
 	this.scene = null;
 
 	// create a default material to render meshes that don't have one
-	this.defaultMaterial = new JSC3D.Material('default', undefined, this.modelColor, 0, true, false); /* EnvironmentCast of Material */
+	/* params: name, ambientColor, diffuseColor, specularColor, 
+					 ambientReflection, diffuseReflection, specularReflection, shininess, 
+					 transparency, environmentCast 
+	*/
+	this.defaultMaterial = new JSC3D.Material('default', undefined, this.modelColor);
 
 	// allocate memory storage for frame buffers
 	if(!this.webglBackend) {
@@ -358,11 +367,15 @@ JSC3D.Viewer.prototype.init = function() {
 	this.generateBackground();
 	this.drawBackground();
 
-	/* Scene Rotation */
+	/* Scene rotation */
 	if (!this.isAutoUpdateOn && this.autoRotateSpeed != 0) 
 		if(JSC3D.console)
-			JSC3D.console.logWarning('Autorotate need to have AutoUpdate switched on.');
+			JSC3D.console.logWarning('AutoRotate need to have AutoUpdate switched on!');
 	
+	/* Lighting */
+	if(!this.webglBackend) {
+		this.lightingMode = 'standard';
+	}
 	// wake up update routine per 30 milliseconds
 	var self = this;
 	
@@ -382,9 +395,14 @@ JSC3D.Viewer.prototype.init = function() {
 			self.fps += (fps - self.fps) / 30; /* low-pass filter */
 			frameUpdateTime = now;
 		}
-		self.doUpdate();
-		if(self.ontick != null && (typeof self.ontick) == 'function')
-			self.ontick();
+		
+		if (self.ctx2d || self.webglBackend) {
+			self.frameNumber++; /* FPS */
+		
+			self.doUpdate();
+			if(self.ontick != null && (typeof self.ontick) == 'function')
+				self.ontick();
+		}
 		
 		if (self.isAutoUpdateOn) 
 			setTimeout(tick, delay);
@@ -415,8 +433,10 @@ JSC3D.Viewer.prototype.update = function(repaintOnly) {
 	else
 		this.needUpdate = true;
 	
-	if (!this.isAutoUpdateOn) 
+	if (!this.isAutoUpdateOn) {
+		this.needUpdate = true; /* Hotfix Pick info after resize*/
 		this.doUpdate();
+	}
 };
 
 /**
@@ -442,7 +462,7 @@ JSC3D.Viewer.prototype.createScene = function(minX, maxX, minY, maxY, minZ, maxZ
 };
 
 /**
-	Viewer Resize
+	Viewer Resize +++ 
  */
 JSC3D.Viewer.prototype.getInnerSize = function() {
 	var style = window.getComputedStyle(this.canvas);
@@ -450,6 +470,7 @@ JSC3D.Viewer.prototype.getInnerSize = function() {
 	var padTB = parseInt(style.paddingTop) + parseInt(style.paddingBottom);
 	return [this.canvas.clientWidth - padLR, this.canvas.clientHeight - padTB];
 }
+/* Viewer Resize --- */
 
 /**
 	Rotate the scene with given angles around Cardinal axes.
@@ -473,14 +494,12 @@ JSC3D.Viewer.prototype.calcRotation = function() { /* Scene Rotation */
 	var s1 = Math.sin(angleX);
 	var c1 = Math.cos(angleX);
 	var angleZ = Math.atan2(-s1*m.m20+c1*m.m10, c1*m.m11+s1*m.m21);
-	
+		
     var degX = angleX * radians;
     var degY = angleY * radians;
     var degZ = angleZ * radians;
 	
-	this.rotation[0] = degX;
-	this.rotation[1] = degY;
-    this.rotation[2] = degZ;
+	this.rotation[0] = degX; this.rotation[1] = degY; this.rotation[2] = degZ; /* Viewer calcRotation */
 }
 
 JSC3D.Viewer.prototype.rotateAboutXAxis = function(rotX) { /* Scene Rotation */
@@ -516,10 +535,10 @@ JSC3D.Viewer.prototype.rotateScene = function(degY) { /* Scene Rotation */
 	}
 	this.sceneRotation += degY;
 	switch (true) {
-		case (this.sceneRotation > 179):
+		case (this.sceneRotation >= 180):
 			this.sceneRotation -= 360;
 			break;
-		case (this.sceneRotation < -179):
+		case (this.sceneRotation <= -180):
 			this.sceneRotation += 360;
 			break;
 	}
@@ -532,7 +551,6 @@ JSC3D.Viewer.prototype.rotateScene = function(degY) { /* Scene Rotation */
 }
 
 JSC3D.Viewer.prototype.autoRotateScene = function() { /* AutoRotation */
-	/* TODO: enhance with ease-in-out */
 	if (this.autoRotateSpeed != 0) {
 		this.rotateScene(this.autoRotateSpeed);
 		this.needUpdate = true;
@@ -670,10 +688,11 @@ JSC3D.Viewer.prototype.setSphereMapFromUrl = function(sphereMapUrl) {
 	Textures preload & materials collection
  */
 JSC3D.Viewer.prototype.addTexture = function(textureUrlName) {
-	var texture = new JSC3D.Texture;
-	texture.createFromUrl(textureUrlName);
 	var fileName = textureUrlName.replace(/^.*(\\|\/|\:)/, '');
-	texture.name = fileName.substr(0,fileName.lastIndexOf('.')) || fileName + '';
+	var textureName = fileName.substr(0,fileName.lastIndexOf('.')) || fileName + '';
+	var texture = new JSC3D.Texture(textureName);
+	texture.createFromUrl(textureUrlName);
+	
 	this.textures.push(texture);
 };
 
@@ -692,8 +711,9 @@ JSC3D.Viewer.prototype.getTexture = function(textureName) {
 /**
 	Textures preload & materials collection
  */
-JSC3D.Viewer.prototype.addMaterial = function(name, ambientColor, diffuseColor, transparency, simulateSpecular, environmentCast) { /* EnvironmentCast of Material */
-	var material = new JSC3D.Material(name, ambientColor, diffuseColor, transparency, simulateSpecular, environmentCast); /* EnvironmentCast of Material */
+JSC3D.Viewer.prototype.addMaterial = function(name, ambientColor, diffuseColor, specularColor, ambientReflection, diffuseReflection, specularReflection, shininess, transparency, environmentCast, lightingCast) {
+	/* EnvironmentCast of Material, Lighting */
+	var material = new JSC3D.Material(name, ambientColor, diffuseColor, specularColor, ambientReflection, diffuseReflection, specularReflection, shininess, transparency, environmentCast, lightingCast);
 	this.materials.push(material);
 };
 
@@ -780,6 +800,8 @@ JSC3D.Viewer.prototype.resetScene = function() {
 	this.currentMesh = null; /* Selected mesh */
 	this.currentGroupName = ''; /* Selected mesh group name */
 	this.rotMatrix.identity();
+	this.scene.isLightingOn = (this.lightingMode != 'standard');
+	this.setup3PointLighting(this.lightingMode, this.showLights); 
 	this.sceneRotation = 0; /* Scene Rotation */
 	this.rotateAboutXAxis(this.initRotX); /* Scene Rotation */
 	this.rotateAboutYAxis(this.initRotY); /* Scene Rotation */
@@ -861,6 +883,8 @@ JSC3D.Viewer.prototype.pick = function(clientX, clientY) {
 JSC3D.Viewer.prototype.doUpdate = function() {
 	this.autoRotateScene(); /* AutoRotation */
 	
+	//if (this.isAutoUpdateOn) this.needUpdate = true;
+	
 	if(this.needUpdate || this.needRepaint) {
 		if(this.beforeupdate != null && (typeof this.beforeupdate) == 'function')
 			this.beforeupdate();
@@ -884,7 +908,7 @@ JSC3D.Viewer.prototype.doUpdate = function() {
 		// clear dirty flags
 		this.needRepaint = false;
 		this.needUpdate = false;
-	
+
 		if(this.afterupdate != null && (typeof this.afterupdate) == 'function')
 			this.afterupdate();
 	}
@@ -910,14 +934,12 @@ JSC3D.Viewer.prototype.mouseDownHandler = function(e) {
 		return;
 
 	if(this.onmousedown) {
-		/* TODO: Drag & Drop mesh */
 		var info = this.pick(e.clientX, e.clientY);
 		/* Selected mesh group name */
 		this.scene.currentMesh = info.mesh;
 		var groupName = info.mesh ? info.mesh.getGroupName() : null; 
 		this.scene.currentGroupName = groupName;
-		if(this.onmousedown)
-			this.onmousedown(info.canvasX, info.canvasY, e.button, info.depth, info.mesh, groupName);
+		this.onmousedown(info.canvasX, info.canvasY, e.button, info.depth, info.mesh, groupName);
 	}
 	
 	e.preventDefault();
@@ -947,7 +969,6 @@ JSC3D.Viewer.prototype.mouseUpHandler = function(e) {
 	}
 
 	if(this.onmouseup) {
-		/* TODO: Drag & Drop mesh */
 		this.onmouseup(info.canvasX, info.canvasY, e.button, info.depth, info.mesh);
 	}
 
@@ -960,12 +981,41 @@ JSC3D.Viewer.prototype.mouseUpHandler = function(e) {
 	e.preventDefault();
 	e.stopPropagation();
 
+	/* Modern all-in-one touch & tablet w. kb */
+	this.isTouchHeld = false; 
+	this.suppressDraggingRotation = false;
+	
 	if(!this.isDefaultInputHandlerEnabled)
 		return;
 
 	this.buttonStates[e.button] = false;
 };
 
+/* Modern all-in-one touch & tablet w. kb */
+JSC3D.Viewer.prototype.mouseClickHandler = function(e) {
+	if(!this.isLoaded)
+		return;
+
+	var info;
+	if(this.onmouseclick && this.mouseDownX == e.clientX && this.mouseDownY == e.clientY) {
+		info = this.pick(e.clientX, e.clientY);
+		this.onmouseclick(info.canvasX, info.canvasY, e.button, info.depth, info.mesh);
+		this.mouseDownX = -1;
+		this.mouseDownY = -1;
+	}
+
+	e.preventDefault();
+	e.stopPropagation();
+
+	/* Modern all-in-one touch & tablet w. kb */
+	this.isTouchHeld = false; 
+	this.suppressDraggingRotation = false;
+	
+	if(!this.isDefaultInputHandlerEnabled)
+		return;
+
+	this.buttonStates[e.button] = false;
+};
 /**
 	The mouseMove event handling routine.
 	@private
@@ -975,7 +1025,6 @@ JSC3D.Viewer.prototype.mouseMoveHandler = function(e) {
 		return;
 
 	if(this.onmousemove) {
-		/* TODO: Drag & Drop mesh */
 		var info = this.pick(e.clientX, e.clientY);
 		this.onmousemove(info.canvasX, info.canvasY, e.button, info.depth, info.mesh);
 	}
@@ -1035,6 +1084,7 @@ JSC3D.Viewer.prototype.mouseWheelHandler = function(e) {
 	this.mouseDownY = -1;
 
 	this.zoomFactor *= (e.wheelDelta ? e.wheelDelta : e.deltaY ? -e.deltaY : -e.detail) < 0 ? 1.1 : 0.91;
+
 	this.update();
 };
 
@@ -1051,14 +1101,12 @@ JSC3D.Viewer.prototype.touchStartHandler = function(e) {
 		var clientY = e.touches[0].clientY;
 
 		if(this.onmousedown) {
-			/* TODO: Drag & Drop mesh */
 			var info = this.pick(clientX, clientY);
 			/* Selected mesh group name */
 			this.scene.currentMesh = info.mesh;
 			var groupName = info.mesh ? info.mesh.getGroupName() : null; 
 			this.scene.currentGroupName = groupName;
-			if(this.onmousedown)
-				this.onmousedown(info.canvasX, info.canvasY, 0, info.depth, info.mesh, groupName);
+			this.onmousedown(info.canvasX, info.canvasY, 0, info.depth, info.mesh, groupName);
 		}
 		
 		e.preventDefault();
@@ -1089,7 +1137,6 @@ JSC3D.Viewer.prototype.touchEndHandler = function(e) {
 	}
 
 	if(this.onmouseup) {
-		/* TODO: Drag & Drop mesh */
 		this.onmouseup(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
 	}
 
@@ -1121,8 +1168,7 @@ JSC3D.Viewer.prototype.touchMoveHandler = function(e) {
 		var clientY = e.touches[0].clientY;
 
 		if(this.onmousemove) {
-			/* TODO: Drag & Drop mesh */
-			var info = this.pick(clientX, clientY); 
+			var info = this.pick(clientX, clientY);
 			this.onmousemove(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
 		}
 
@@ -1219,6 +1265,7 @@ JSC3D.Viewer.prototype.gestureHandler = function(e) {
 	/* Selected mesh group name */
 	var groupName = info.mesh ? info.mesh.getGroupName() : null; 
 
+	//console.log('GESTURE EVENT Type: ' + e.type);
 	switch(e.type) {
 	case 'touch':
 		if(this.onmousedown)
@@ -1230,7 +1277,6 @@ JSC3D.Viewer.prototype.gestureHandler = function(e) {
 		this.mouseDownY = clientY;
 		break;
 	case 'release':
-		/* TODO: Drag & Drop mesh */
 		if(this.onmouseup)
 			this.onmouseup(info.canvasX, info.canvasY, 0, info.depth, info.mesh);
 		if(this.onmouseclick && this.mouseDownX == clientX && this.mouseDownY == clientY)
@@ -1240,7 +1286,6 @@ JSC3D.Viewer.prototype.gestureHandler = function(e) {
 		this.isTouchHeld = false;
 		break;
 	case 'hold':
-		/* TODO: Drag & Drop mesh */
 		this.isTouchHeld = true;
 		this.mouseDownX = -1;
 		this.mouseDownY = -1;
@@ -1303,7 +1348,7 @@ JSC3D.Viewer.prototype.gestureHandler = function(e) {
 };
 
 /**
-	Viewer Resize.
+	Viewer Resize +++ 
  */
 JSC3D.Viewer.prototype.resize = function() {
 	var cb = this.getInnerSize();
@@ -1335,28 +1380,75 @@ JSC3D.Viewer.prototype.resize = function() {
 		this.zoomFactor *= ratio;
 		this.panning[0] *= ratio;
 		this.panning[1] *= ratio;
+		this.frameWidth = frameWidth;
+		this.frameHeight = frameHeight;	
 		if (this.webglBackend) {
-			this.webglBackend.canvas = this.canvas;
-			this.frameWidth = frameWidth;
-			this.frameHeight = frameHeight;		
+			this.webglBackend.resizeFrame(w,h);
 		} else {
-			this.canvasData = this.ctx2d.getImageData(0, 0, this.canvas.width, this.canvas.height);
-			this.frameWidth = frameWidth;
-			this.frameHeight = frameHeight;
-			var newSize = frameWidth * frameHeight;
-			if(this.colorBuffer.length < newSize)
-				this.colorBuffer = new Array(newSize);
-			if(this.zBuffer.length < newSize)
-				this.zBuffer = new Array(newSize);
-			if(this.selectionBuffer.length < newSize)
-				this.selectionBuffer = new Array(newSize);
-			if(this.bkgColorBuffer.length < newSize)
-				this.bkgColorBuffer = new Array(newSize);
+			if (this.ctx2d) {
+				this.canvasData = this.ctx2d.getImageData(0, 0, this.canvas.width, this.canvas.height);
+				var newSize = frameWidth * frameHeight;
+				if(this.colorBuffer.length < newSize)
+					this.colorBuffer = new Array(newSize);
+				if(this.zBuffer.length < newSize)
+					this.zBuffer = new Array(newSize);
+				if(this.selectionBuffer.length < newSize)
+					this.selectionBuffer = new Array(newSize);
+				if(this.bkgColorBuffer.length < newSize)
+					this.bkgColorBuffer = new Array(newSize);
+			}
 		}
-		this.generateBackground();
-		this.needUpdate = true;
-		this.doUpdate();
+		if (this.isLoaded) {
+			this.generateBackground();
+			this.needUpdate = true;
+			this.doUpdate();
+		}
 	}
+};
+/* Viewer Resize --- */
+
+/**
+	Lighting
+ */
+JSC3D.Viewer.prototype.setup3PointLighting = function(lightingMode,showLights) {
+	var greyLights = (lightingMode == 'greyscale');
+	var aabb = this.scene.aabb;
+	this.scene.xformMat.identity();
+	this.scene.lights = [];
+	var lights = [
+		{position:[aabb.minX,.1*aabb.maxY,0],diffuse:(greyLights) ? 0x444444 : 0xFF0000,enabled: true}, // Key light
+		{position:[0,.5*aabb.maxY,aabb.maxZ],diffuse:(greyLights) ? 0x666666 : 0x00FF00,enabled: true}, // Fill light
+		{position:[aabb.maxX,aabb.maxY,aabb.minZ],diffuse:(greyLights) ? 0xCBCBCB : 0x0000FF,enabled: true}, // Back light
+		];
+	for(var i=0, l=lights.length; i<l; i++) {
+		var lightVisible = (lights[i].enabled && showLights);
+		var lightEnabled = (lights[i].enabled && lightingMode != 'standard');
+		this.scene.addLight(lights[i].position[0], lights[i].position[1], lights[i].position[2], lights[i].ambient, lights[i].diffuse, lightEnabled, lightVisible);
+	}
+};
+
+JSC3D.Viewer.prototype.rotateLights = function() {
+	if (!this.scene) return;
+
+	var light = this.scene.getMeshes('light-1')[0];
+	light.rotate([0,1,0]);
+	var meshCenter = light.aabb.center();
+	this.scene.lights[0].position = [meshCenter[0],meshCenter[1],meshCenter[2]];
+	this.scene.lights[0].compiled = null;
+	
+	var light = this.scene.getMeshes('light-2')[0];
+	light.rotate([0,1,0]);
+	var meshCenter = light.aabb.center();
+	this.scene.lights[1].position = [meshCenter[0],meshCenter[1],meshCenter[2]];
+	this.scene.lights[1].compiled = null;
+
+	var light = this.scene.getMeshes('light-3')[0];
+	light.rotate([0,0,1]);
+	var meshCenter = light.aabb.center();
+	this.scene.lights[2].position = [meshCenter[0],meshCenter[1],meshCenter[2]];
+	this.scene.lights[2].compiled = null;
+	
+	this.needUpdate = true;
 };
 
 /**
@@ -1467,7 +1559,7 @@ JSC3D.Viewer.prototype.setupScene = function(scene) {
 	}
 
 	scene.init();
-
+	
 	if(scene.aabb) {  /* Setup an initial empty scene with given extent */
 		var d = scene.aabb.lengthOfDiagonal();
 		var w = this.frameWidth;
@@ -1483,6 +1575,13 @@ JSC3D.Viewer.prototype.setupScene = function(scene) {
 	this.rotateAboutZAxis(this.initRotZ); /* Scene Rotation */
 	this.rotateScene(this.initSceneRotation); /* Scene Rotation */
 	this.scene = scene;
+
+	/* Lighting +++ */
+	this.scene.rotMat.clone(this.rotMatrix);
+	this.scene.isLightingOn = (this.lightingMode != 'standard');
+	this.setup3PointLighting(this.lightingMode, this.showLights); 
+	/* Lighting --- */
+	
 	this.isLoaded = true;
 	this.isFailed = false;
 	this.needUpdate = false;
@@ -1737,8 +1836,9 @@ JSC3D.Viewer.prototype.drawBackground = function() {
 	@private
  */
 JSC3D.Viewer.prototype.beginScene = function() {
+	var w = this.frameWidth, h = this.frameHeight;
 	if(this.webglBackend) {
-		this.webglBackend.beginFrame(this.definition, this.isBackgroundOn);
+		this.webglBackend.beginFrame(this.definition, this.isBackgroundOn, w, h);
 		return;
 	}
 
@@ -1754,6 +1854,7 @@ JSC3D.Viewer.prototype.beginScene = function() {
 		zbuf[i] = MIN_Z;
 		sbuf[i] = 0;
 	}
+	
 };
 
 /**
@@ -1834,10 +1935,10 @@ JSC3D.Viewer.prototype.render = function() {
 	var w = this.frameWidth;
 	var h = this.frameHeight;
 	var aabb = this.scene.aabb;
-
+	var d = aabb.lengthOfDiagonal();
+	
 	// calculate transformation matrix
 	if(this.webglBackend) {
-		var d = aabb.lengthOfDiagonal();
 		/* TODO v2: fix meshes goes sometimes clipped in Z+ */
 		this.transformMatrix.identity();
 		this.transformMatrix.translate(-0.5*(aabb.minX+aabb.maxX), -0.5*(aabb.minY+aabb.maxY), -0.5*(aabb.minZ+aabb.maxZ));
@@ -1852,13 +1953,33 @@ JSC3D.Viewer.prototype.render = function() {
 		this.transformMatrix.scale(this.zoomFactor, -this.zoomFactor, this.zoomFactor);
 		this.transformMatrix.translate(0.5*w+this.panning[0], 0.5*h+this.panning[1], 0);
 	}
+	
+	/* Lighting +++ */
+	if(this.webglBackend) {
+		this.scene.xformMat.identity();
+		this.scene.xformMat.translate(-0.5*(aabb.minX+aabb.maxX), -0.5*(aabb.minY+aabb.maxY), -0.5*(aabb.minZ+aabb.maxZ));
+		this.scene.xformMat.multiply(this.scene.rotMat);
+		this.scene.xformMat.scale(2*this.zoomFactor/w, 2*this.zoomFactor/h, -2/d);
+		this.scene.xformMat.translate(2*this.panning[0]/w, -2*this.panning[1]/h, 0);
+	}
+	else {
+		this.scene.xformMat.identity();
+		this.scene.xformMat.translate(-0.5*(aabb.minX+aabb.maxX), -0.5*(aabb.minY+aabb.maxY), -0.5*(aabb.minZ+aabb.maxZ));
+		this.scene.xformMat.multiply(this.scene.rotMat);
+		this.scene.xformMat.scale(this.zoomFactor, -this.zoomFactor, this.zoomFactor);
+		this.scene.xformMat.translate(0.5*w+this.panning[0], 0.5*h+this.panning[1], 0);
+	}
+	for(var i=0,l= this.scene.lights.length; i<l; i++) {
+		JSC3D.Math3D.transformVectors(this.scene.xformMat, this.scene.lights[i].position, this.scene.lights[i].transformedPosition);
+	}
+	/* Lighting --- */
 
 	// sort meshes into a render list
 	var renderList = this.sortScene(this.transformMatrix);
 
 	// delegate to WebGL backend to do the rendering
 	if(this.webglBackend) {
-		this.webglBackend.render(this.scene.getChildren(), this.transformMatrix, this.rotMatrix, this.renderMode, this.defaultMaterial, this.sphereMap, this.isCullingDisabled);
+		this.webglBackend.render(this.scene.getChildren(), this.scene.lights, this.scene.xformMat, this.scene.rotMat, this.transformMatrix, this.rotMatrix, this.renderMode, this.defaultMaterial, this.sphereMap, this.isCullingDisabled);
 		return;
 	}
 
@@ -1867,7 +1988,12 @@ JSC3D.Viewer.prototype.render = function() {
 		var mesh = renderList[i];
 
 		if(!mesh.isTrivial()) {
-			JSC3D.Math3D.transformVectors(this.transformMatrix, mesh.vertexBuffer, mesh.transformedVertexBuffer);
+			/* Lighting */
+			if (mesh.isPositionFixed) {
+				JSC3D.Math3D.transformVectors(this.scene.xformMat, mesh.vertexBuffer, mesh.transformedVertexBuffer);
+			} else {
+				JSC3D.Math3D.transformVectors(this.transformMatrix, mesh.vertexBuffer, mesh.transformedVertexBuffer);
+			}
 
 			if(mesh.visible) {
 				switch(mesh.renderMode || this.renderMode) {
@@ -1896,7 +2022,9 @@ JSC3D.Viewer.prototype.render = function() {
 						this.renderSolidFlat(mesh);
 					break;
 				case 'texturesmooth':
-					var environmentCast = (mesh.material) ? mesh.material.isEnvironmentCast : mesh.isEnvironmentCast; /* EnvironmentCast of Material */
+					var matEnvCast = (mesh.material) ? mesh.material.isEnvironmentCast : false; /* EnvironmentCast of Material */
+					var texEnvCast = (mesh.texture) ? mesh.texture.isEnvironmentCast : false; /* EnvironmentCast of Texture */
+					var environmentCast = matEnvCast || texEnvCast;
 					if(environmentCast && this.sphereMap != null && this.sphereMap.hasData())
 						this.renderSolidSphereMapped(mesh);
 					else if(mesh.hasTexture())
@@ -2046,7 +2174,12 @@ JSC3D.Viewer.prototype.renderWireframe = function(mesh) {
 		nbuf = mesh.transformedFaceNormalZBuffer;
 	}
 
-	JSC3D.Math3D.transformVectorZs(this.rotMatrix, mesh.faceNormalBuffer, nbuf);
+	/* Lighting */
+	if (mesh.isPositionFixed) {
+		nbuf = mesh.faceNormalBuffer;
+	} else {
+		JSC3D.Math3D.transformVectorZs(this.rotMatrix, mesh.faceNormalBuffer, nbuf);
+	}
 
 	var i = 0, j = 0;
 	while(i < numOfFaces) {
@@ -2366,9 +2499,15 @@ JSC3D.Viewer.prototype.renderSolidSmooth = function(mesh) {
 		fnbuf = mesh.transformedFaceNormalZBuffer;
 	}
 
-	JSC3D.Math3D.transformVectorZs(this.rotMatrix, mesh.vertexNormalBuffer, vnbuf);
-	JSC3D.Math3D.transformVectorZs(this.rotMatrix, mesh.faceNormalBuffer, fnbuf);
-
+	/* Lighting */
+	if (mesh.isPositionFixed) {
+		vnbuf = mesh.vertexNormalBuffer;
+		fnbuf = mesh.faceNormalBuffer;
+	} else {
+		JSC3D.Math3D.transformVectorZs(this.rotMatrix, mesh.vertexNormalBuffer, vnbuf);
+		JSC3D.Math3D.transformVectorZs(this.rotMatrix, mesh.faceNormalBuffer, fnbuf);
+	}
+	
 	var Xs = new Array(3);
 	var Ys = new Array(3);
 	var Zs = new Array(3);
@@ -3801,6 +3940,7 @@ JSC3D.Viewer.prototype.zoomFactor = 1;
 JSC3D.Viewer.prototype.panning = [0, 0];
 JSC3D.Viewer.prototype.rotation = [0, 0, 0]; /* Scene Rotation */
 JSC3D.Viewer.prototype.fps = 0; /* FPS */
+JSC3D.Viewer.prototype.frameNumber = 0; /* FPS */
 JSC3D.Viewer.prototype.rotMatrix = null;
 JSC3D.Viewer.prototype.transformMatrix = null;
 JSC3D.Viewer.prototype.sceneUrl = '';
@@ -3816,6 +3956,8 @@ JSC3D.Viewer.prototype.sphereMapUrl = '';
 JSC3D.Viewer.prototype.showProgressBar = true;
 JSC3D.Viewer.prototype.isAutoUpdateOn = false; /* FPS */
 JSC3D.Viewer.prototype.autoRotateSpeed = 0; /* AutoRotation */
+JSC3D.Viewer.prototype.lightingMode = 'standard'; /* Lighting */
+JSC3D.Viewer.prototype.showLights = false; /* Lighting */
 JSC3D.Viewer.prototype.buttonStates = null;
 JSC3D.Viewer.prototype.keyStates = null;
 JSC3D.Viewer.prototype.mouseX = 0;
@@ -3913,6 +4055,10 @@ JSC3D.Scene = function(name) {
 	this.maxChildId = 1;
 	this.currentMesh = null; /* Selected mesh */
 	this.currentGroupName = ''; /* Selected mesh group name */
+	this.isLightingOn = false; /* Lighting */
+	this.rotMat = new JSC3D.Matrix3x4; /* Lighting */
+	this.xformMat = new JSC3D.Matrix3x4; /* Lighting */
+	this.lights = []; /* Lighting */
 };
 
 /**
@@ -3948,6 +4094,11 @@ JSC3D.Scene.prototype.isEmpty = function() {
  */
 JSC3D.Scene.prototype.addChild = function(mesh) {
 	mesh.internalId = this.maxChildId++;
+	/* Mesh positioning */
+	if (!mesh.axis) {
+		mesh.setAxis();
+	}
+
 	this.children.push(mesh);
 };
 
@@ -3956,7 +4107,6 @@ JSC3D.Scene.prototype.addChild = function(mesh) {
 	@param {JSC3D.Mesh} mesh the mesh to be removed.
  */
 JSC3D.Scene.prototype.removeChild = function(mesh) {
-	/* TODO: check existence of currentMesh, currentGroupName */
 	var foundAt = this.children.indexOf(mesh);
 	if(foundAt >= 0)
 		this.children.splice(foundAt, 1);
@@ -4032,8 +4182,71 @@ JSC3D.Scene.prototype.children = null;
 JSC3D.Scene.prototype.maxChildId = 1;
 JSC3D.Scene.prototype.currentMesh = null; /* Selected mesh */
 JSC3D.Scene.prototype.currentGroupName = ''; /* Selected mesh group name */
-JSC3D.Scene.prototype.meshResizeMode = 'center'; /* Mesh positioning  */
-JSC3D.Scene.prototype.meshRotationMode = 'center'; /* Mesh positioning  */
+JSC3D.Scene.prototype.isLightingOn = false; /* Lighting */
+JSC3D.Scene.prototype.xformMat = null; /* Lighting */
+JSC3D.Scene.prototype.lights = []; /* Lighting */
+
+/* Mesh clone +++ */
+JSC3D.Scene.prototype.cloneMesh = function(mesh, rotation, rotationMode, translation, translationMode, scale, scaleMode) {
+	var newMesh = new JSC3D.Mesh;
+	newMesh.name = mesh.name;
+	newMesh.creaseAngle = mesh.creaseAngle;
+	newMesh.isDoubleSided = mesh.isDoubleSided;
+	newMesh.renderMode = mesh.renderMode;
+	newMesh.axis = [mesh.axis[0],mesh.axis[1],mesh.axis[2]];
+	newMesh.visible = mesh.visible;
+	
+	var xformMat = new JSC3D.Matrix3x4;
+	var normalMat = new JSC3D.Matrix3x4;
+	var vertexRotMat = new JSC3D.Matrix3x4;
+
+	var pivot;
+	var center = mesh.aabb.center();
+	switch (rotationMode) {
+		case 'axis':
+			//pivot = [center[0]-mesh.axis[0],center[1]-this.axis[1],center[2]-this.axis[2]];
+			pivot = [mesh.translation[0],mesh.translation[1],mesh.translation[2]];
+			break;
+		case 'scene':
+			break;
+		case 'center':
+			pivot = mesh.aabb.center();
+			break;
+	}
+
+	if (rotation) {
+		if (pivot) vertexRotMat.translate(-pivot[0], -pivot[1], -pivot[2]);	
+		normalMat.rotateAboutXAxis(rotation[0]); 
+		vertexRotMat.rotateAboutXAxis(rotation[0]); 
+		normalMat.rotateAboutYAxis(rotation[1]); 
+		vertexRotMat.rotateAboutYAxis(rotation[1]); 
+		normalMat.rotateAboutZAxis(rotation[2]); 
+		vertexRotMat.rotateAboutZAxis(rotation[2]); 
+		if (pivot) vertexRotMat.translate(pivot[0], pivot[1], pivot[2]);
+	}
+	
+	xformMat.multiply(vertexRotMat);
+	if (translation) xformMat.translate(translation[0], translation[1], translation[2]);
+	if (scale) xformMat.scale(scale[0], scale[1], scale[2]);
+	
+	newMesh.indexBuffer = mesh.indexBuffer;
+	newMesh.vertexBuffer = new Array(mesh.vertexBuffer.length);
+	newMesh.faceNormalBuffer = new Array(mesh.faceNormalBuffer.length);
+
+	JSC3D.Math3D.transformVectors(xformMat, mesh.vertexBuffer, newMesh.vertexBuffer);
+	JSC3D.Math3D.transformVectors(normalMat, mesh.faceNormalBuffer, newMesh.faceNormalBuffer);
+
+	newMesh.mtllib = mesh.mtllib;
+	newMesh.mtl = mesh.mtl;
+	newMesh.setMaterial(mesh.material);
+	newMesh.setTexture(mesh.texture);
+	newMesh.texCoordBuffer = []; /* TODO ? */
+	newMesh.texCoordIndexBuffer = []; /* TODO ? */
+	newMesh.init();
+	this.addChild(newMesh);
+	return this.children[this.children.length-1];
+};
+/* Mesh clone --- */
 
 /**
 	Mesh grouping by name
@@ -4049,85 +4262,139 @@ JSC3D.Scene.prototype.getMeshes = function(groupName) {
 		pos = (indexPos === -1) ? mesh.name.length : indexPos;
 		if (mesh.name.substring(0, pos) === groupName)
 			meshes.push(mesh);
+		if (mesh.name === groupName) {
+			meshes = [];
+			meshes.push(mesh);
+		}
 	}
 	return meshes;
 };
 
 /**
-	Mesh positioning - Default resize center for new meshes (direction of increase/decrease size)
- */
-JSC3D.Scene.prototype.setMeshResizeMode = function(resizeMode) {
-	/** 
-		"plus":   mesh.aabb.minX, .minY, .minZ remains untouched
-		"minus":  mesh.aabb.maxX, .maxY, .maxZ remains untouched
-		"center": mesh will resize centered to mesh.aabb.center
-	*/
-	this.meshResizeMode = resizeMode;
-};
-
-/**
-	Mesh positioning - Default rotation center for new meshes (pivoting)
- */
-JSC3D.Scene.prototype.setMeshRotationMode = function(rotationMode) {
-	/** 
-		"axis":   mesh will rotate about mesh axis using stored translation
-		"scene":  mesh will rotate about scene center, e.g. orbit
-		"center": mesh will rotate about mesh.aabb.center
-	*/
-	this.meshRotationMode = rotationMode;
-};
-
-/**
 	Groundplane, thanks: humu2009
  */
-JSC3D.Scene.prototype.makeGroundPlane = function(color, renderMode) {
-	var sceneBox = this.aabb;
-	var planeCenter = sceneBox.center();
-	var planeHalfSize = 0.5 * Math.max(sceneBox.maxX - sceneBox.minX, sceneBox.maxZ - sceneBox.minZ);
+JSC3D.Scene.prototype.makeGroundPlane = function(color, texture, renderMode) {
+	var rMode = renderMode || 'wireframe';
+	var lightingCast = true;
+	var aabb = this.aabb;
+	var planeCenter = aabb.center();
+	var planeHalfSize = 0.5 * Math.max(aabb.maxX - aabb.minX, aabb.maxZ - aabb.minZ);
 
 	var planeMinX = planeCenter[0] - planeHalfSize;
 	var planeMinZ = planeCenter[2] - planeHalfSize;
 
 	/* move the ground plane slightly off the bottom of the bounding box */
 	/* to avoid potential z-fighting between the plane and the model */
-	var planeY = sceneBox.minY - 0.001 * (sceneBox.maxY - sceneBox.minY);
-
-	/* to be simple, we just split the ground plane to 10x10 sub faces */
-	var numOfGridsPerDimension = 10;
-	var sizePerGrid = 2 * planeHalfSize / numOfGridsPerDimension;
-
+	var planeY = aabb.minY - 0.001 * (aabb.maxY - aabb.minY);
 	/* construct the ground plane */
-	groundPlane = new JSC3D.Mesh;
-	groundPlane.name = 'groundplane';
-	/* compute vertices of the plane */
-	groundPlane.vertexBuffer = [];
-	for (var i=0; i<=numOfGridsPerDimension; i++) {
-		for (var j=0; j<=numOfGridsPerDimension; j++) {
-			groundPlane.vertexBuffer.push(planeMinX + j * sizePerGrid, planeY, planeMinZ + i * sizePerGrid);
+	var plane = new JSC3D.Mesh;
+	plane.name = 'groundplane';
+	
+	if (renderMode == 'texture' || renderMode == 'textureflat' || renderMode == 'texturesmooth') {
+		plane.vertexBuffer = [planeMinZ,planeY,-planeMinX, -planeMinZ,planeY,-planeMinX, -planeMinZ,planeY,planeMinX, planeMinZ,planeY,planeMinX];
+		plane.indexBuffer = [0,1,2,-1,3,0,2,-1];
+		plane.texCoordBuffer = [1,0,0,0,0,1,1,1];
+		plane.texCoordIndexBuffer = [0,1,2,-1,3,0,2,-1];		
+	} else {
+		/* to be simple, we just split the ground plane to 10x10 sub faces */
+		var numOfGridsPerDimension = 10;
+		var sizePerGrid = 2 * planeHalfSize / numOfGridsPerDimension;
+		/* compute vertices of the plane */
+		plane.vertexBuffer = [];
+		for (var i=0; i<=numOfGridsPerDimension; i++) {
+			for (var j=0; j<=numOfGridsPerDimension; j++) {
+				plane.vertexBuffer.push(planeMinX + j * sizePerGrid, planeY, planeMinZ + i * sizePerGrid);
+			}
 		}
+		/* compute indices of the plane */
+		plane.indexBuffer = [];
+		for (var i=0; i<numOfGridsPerDimension; i++) {
+			for (var j=0; j<numOfGridsPerDimension; j++) {
+				plane.indexBuffer.push(i * (numOfGridsPerDimension + 1) + j, (i + 1) * (numOfGridsPerDimension + 1) + j, (i + 1) * (numOfGridsPerDimension + 1) + j + 1, i * (numOfGridsPerDimension + 1) + j + 1, -1);
+			}
+		}
+	}
+	plane.isDoubleSided = true; /* disable backface culling */
+	if (renderMode == 'point' || renderMode == 'wireframe' || renderMode == 'flat' || renderMode == 'texture')
+		lightingCast = false;
+	
+	if (texture) {
+		plane.setTexture(texture);
+		plane.texture.isLightingCast = lightingCast;
 	}
 
-	/* compute indices of the plane */
-	groundPlane.indexBuffer = [];
-	for (var i=0; i<numOfGridsPerDimension; i++) {
-		for (var j=0; j<numOfGridsPerDimension; j++) {
-			groundPlane.indexBuffer.push(
-				i * (numOfGridsPerDimension + 1) + j, 
-				(i + 1) * (numOfGridsPerDimension + 1) + j, 
-				(i + 1) * (numOfGridsPerDimension + 1) + j + 1, 
-				i * (numOfGridsPerDimension + 1) + j + 1, 
-				-1 
-			);
-		}
+	if (color) {
+		plane.setMaterial(new JSC3D.Material('groundplane', undefined, color));
+		plane.material.isLightingCast = lightingCast;
 	}
-	
-	groundPlane.isDoubleSided = true; /* disable backface culling */
-	groundPlane.init();
-	groundPlane.setRenderMode(renderMode);
-	groundPlane.setMaterial(new JSC3D.Material('groundplane', undefined, color, 0, false, false)); /* EnvironmentCast of material */
-	this.addChild(groundPlane);
+
+	plane.setRenderMode(rMode);
+	plane.init();
+	this.addChild(plane);
+	return this.children[this.children.length-1];
 };
 
+/**
+	Icosahedron, generator code from "Tessellation of sphere" http://student.ulb.ac.be/~claugero/sphere/index.html
+ */
+JSC3D.Scene.prototype.makeLightSphere = function(color, renderMode) {
+	var sphere = new JSC3D.Mesh;
+	var id = this.lights.length;
+	sphere.name = 'light-'+id;
+	sphere.vertexBuffer = [];
+	sphere.indexBuffer = [];
+	
+	var s = 1, 
+		r = (1+Math.sqrt(5))/2, 
+		t = (r/Math.sqrt(1+r*r)) * s, 
+		o = (1/Math.sqrt(1+r*r)) * s;
+	var icosahedron = {
+		points: [[t,o,0],[-t,o,0],[-t,-o,0],[t,-o,0],[o,0,t],[o,0,-t],[-o,0,-t],[-o,0,t],[0,t,o],[0,-t,o],[0,-t,-o],[0,t,-o]],
+		faces: [[4,8,7],[4,7,9],[5,6,11],[5,10,6],[0,4,3],[0,3,5],[2,7,1],[2,1,6],[8,0,11],[8,11,1],[9,10,3],[9,2,10],[8,4,0],[11,0,5],[4,9,3],[5,3,10],[7,8,1],[6,1,11],[7,2,9],[6,10,2]]
+	};
+	
+	for(var i=0,l=icosahedron.points.length; i<l; i++) {
+		for(var j=0; j<3; j++) {
+			sphere.vertexBuffer.push(icosahedron.points[i][j]);
+		}
+	}
+	for(var i=0,l=icosahedron.faces.length; i<l; i++) {
+		for(var j=0; j<3; j++) {
+			sphere.indexBuffer.push(icosahedron.faces[i][j]);
+		}
+		sphere.indexBuffer.push(-1);
+	}
+	
+	sphere.creaseAngle = 41;
+	sphere.init();
+	sphere.setRenderMode(renderMode);
+	sphere.setMaterial(new JSC3D.Material('light-'+id, undefined, color));
+	this.addChild(sphere);
+	return this.children[this.children.length-1];
+} 
+ 
+/**
+	Lighting
+ */
+JSC3D.Scene.prototype.addLight = function(posX, posY, posZ, ambientColor, diffuseColor, enabled, visible) {
+	var aabb = this.aabb;
+	var size = 0.01 * Math.max(aabb.maxX - aabb.minX, aabb.maxZ - aabb.minZ);
+	var id = this.lights.length;
+
+	if (id == 6) {
+		if(JSC3D.console)
+			JSC3D.console.logError('Cannot add another light. Max number of lights reached!');
+	}
+		
+	var light = new JSC3D.Light('light-'+(id+1),[posX, posY, posZ], ambientColor, diffuseColor, enabled);
+	this.lights.push(light);
+	var mesh = this.makeLightSphere(diffuseColor, 'flat');
+	mesh.isPositionFixed = true;
+	mesh.resize([size,size,size], 'center');
+	mesh.translate([posX,posY,posZ], 'scene');
+	mesh.visible = this.isLightingOn ? visible : false;
+}
+ 
 /**
 	@class Mesh
 
@@ -4153,17 +4420,16 @@ JSC3D.Scene.prototype.makeGroundPlane = function(color, renderMode) {
 			default: 
 				"center"
 */
-JSC3D.Mesh = function(name, visible, material, texture, creaseAngle, isDoubleSided, isEnvironmentCast, coordBuffer, indexBuffer, texCoordBuffer, texCoordIndexBuffer) {
+JSC3D.Mesh = function(name, visible, material, texture, creaseAngle, doubleSided, positionFixed, coordBuffer, indexBuffer, texCoordBuffer, texCoordIndexBuffer) {
 	this.name = name || '';
 	this.metadata = '';
 	this.visible = (visible != undefined) ? visible : true;
 	this.renderMode = null;
 	this.aabb = null;
+	this.axis = null; /* Mesh positioning */
 	this.rotation = [0,0,0]; /* Mesh positioning */
 	this.translation = [0,0,0]; /* Mesh positioning */
 	this.scaling = [1,1,1]; /* Mesh positioning */
-	this.resizeMode = 'center'; /* Mesh positioning */
-	this.rotationMode = 'center'; /* Mesh positioning */
 	this.vertexBuffer = coordBuffer || null;
 	this.indexBuffer = indexBuffer || null;
 	this.vertexNormalBuffer = null;
@@ -4173,8 +4439,8 @@ JSC3D.Mesh = function(name, visible, material, texture, creaseAngle, isDoubleSid
 	this.texture = texture || null;
 	this.faceCount = 0;
 	this.creaseAngle = (creaseAngle >= 0) ? creaseAngle : -180;
-	this.isDoubleSided = isDoubleSided || false;
-	this.isEnvironmentCast = isEnvironmentCast || false;
+	this.isDoubleSided = (typeof doubleSided) == 'boolean' ? doubleSided : false;
+	this.isPositionFixed = (typeof positionFixed) == 'boolean' ? positionFixed : false; /* Lighting */
 	this.internalId = 0;
 	this.texCoordBuffer = texCoordBuffer || null;
 	this.texCoordIndexBuffer = texCoordIndexBuffer || null;
@@ -4331,33 +4597,26 @@ JSC3D.Mesh.prototype.calcAABB = function() {
 };
 
 /**
-	Mesh movements - rotation center (pivoting)
-	default: "center"
+	Mesh movements - get scale as units e.g. width, height, depht
  */
-JSC3D.Mesh.prototype.setRotationMode = function(rotationMode) {
-	/** 
-		"axis":   mesh will rotate about mesh axis using stored translation
-		"scene":  mesh will rotate about scene center, e.g. orbit
-		"center": mesh will rotate about mesh.aabb.center
-	*/
-	this.rotationMode = rotationMode;
+JSC3D.Mesh.prototype.getSize = function() {
+	var meshBox = this.aabb;
+	return [meshBox.maxX - meshBox.minX, meshBox.maxY - meshBox.minY, meshBox.maxZ - meshBox.minZ];
 };
 
 /**
-	Mesh movements - resize center (direction)
-	default: "center"
+	Mesh movements - set pivot for Mesh.rotationMode="axis" from current position
  */
-JSC3D.Mesh.prototype.setResizeMode = function(resizeMode) {
-	/** 
-		"plus":   mesh.aabb.minX, .minY, .minZ remains untouched
-		"minus":  mesh.aabb.maxX, .maxY, .maxZ remains untouched
-		"center": mesh will resize centered to mesh.aabb.center
-	*/
-	this.resizeMode = resizeMode;
-};
-
+JSC3D.Mesh.prototype.setAxis = function() {
+	if(!this.aabb) {
+		this.aabb = new JSC3D.AABB;
+		this.calcAABB();
+	}
+	this.axis = this.aabb.center();
+}
+	
 /**
-	Calculate per face normals. The reault remain un-normalized for later vertex normal calculations.
+	Calculate per face normals. The result remain un-normalized for later vertex normal calculations.
 	@private
  */
 JSC3D.Mesh.prototype.calcFaceNormals = function() {
@@ -4573,6 +4832,10 @@ JSC3D.Mesh.prototype.renderMode = 'flat';
  */
 JSC3D.Mesh.prototype.aabb = null;
 /** 
+ * The Axis position of the mesh. Set to 0 0 0 on mesh load. Read only.
+ */
+JSC3D.Mesh.prototype.axis = null; /* Mesh positioning */
+/** 
  * The Axis rotation of the mesh. Set to 0 0 0 on mesh load. Read only.
  */
 JSC3D.Mesh.prototype.rotation = null; /* Mesh positioning */
@@ -4618,10 +4881,7 @@ JSC3D.Mesh.prototype.creaseAngle = -180;
  * {Boolean} If set to true, both sides of the faces will be rendered.
  */
 JSC3D.Mesh.prototype.isDoubleSided = false;
-/**
- * {Boolean} If set to true, the mesh accepts environment mapping.
- */
-JSC3D.Mesh.prototype.isEnvironmentCast = false;
+JSC3D.Mesh.prototype.isPositionFixed = false; /* Lighting */
 JSC3D.Mesh.prototype.internalId = 0;
 JSC3D.Mesh.prototype.transformedVertexBuffer = null;
 JSC3D.Mesh.prototype.transformedVertexNormalZBuffer = null;
@@ -4629,14 +4889,22 @@ JSC3D.Mesh.prototype.transformedFaceNormalZBuffer = null;
 JSC3D.Mesh.prototype.transformedVertexNormalBuffer = null;
 
 /* Mesh positioning +++ */
-JSC3D.Mesh.prototype.rotate = function(rotation) {
+/** 
+	rotationMode:
+	"axis":   mesh will rotate about mesh axis using stored translation
+	"scene":  mesh will rotate about scene center, e.g.: orbit about scene center
+	"center": mesh will rotate about mesh.aabb.center
+*/
+JSC3D.Mesh.prototype.rotate = function(rotation, rotationMode) {
 	var xformMat = new JSC3D.Matrix3x4;
 	var normalMat = new JSC3D.Matrix3x4;
 	var vertexRotMat = new JSC3D.Matrix3x4;
 	
 	var pivot;
-	switch (this.rotationMode) {
+	var center = this.aabb.center();
+	switch (rotationMode) {
 		case 'axis':
+			//pivot = [center[0]-this.axis[0],center[1]-this.axis[1],center[2]-this.axis[2]];
 			pivot = [this.translation[0],this.translation[1],this.translation[2]];
 			break;
 		case 'scene':
@@ -4649,18 +4917,15 @@ JSC3D.Mesh.prototype.rotate = function(rotation) {
 	/* store rotation */
 	var f = 360, s = 180;
 	rotation[0] %= f; rotation[1] %= f; rotation[2] %= f;
-	var maxX = this.rotation[0]+rotation[0];
-	var maxY = this.rotation[1]+rotation[1];
-	var maxZ = this.rotation[2]+rotation[2];
+	var maxX = this.rotation[0]+rotation[0]; /* Mesh rotate */
+	var maxY = this.rotation[1]+rotation[1]; /* Mesh rotate */
+	var maxZ = this.rotation[2]+rotation[2]; /* Mesh rotate */
 	
 	var degX = rotation[0], degY = rotation[1], degZ = rotation[2];
 	if (maxX < -s) degX += f; if (maxX >= s) degX -= f;
 	if (maxY < -s) degY += f; if (maxY >= s) degY -= f;
 	if (maxZ < -s) degZ += f; if (maxZ >= s) degZ -= f;
-	this.rotation[0]+=degX;this.rotation[1]+=degY;this.rotation[2]+=degZ;
-	
-	if(JSC3D.console)
-		JSC3D.console.logInfo('Mesh rotation: ' + JSON.stringify(this.rotation));
+	this.rotation[0]+=degX;this.rotation[1]+=degY;this.rotation[2]+=degZ; /* Mesh rotate */
 	
 	/* rotate normals */
 	if (!!degX) normalMat.rotateAboutXAxis(degX);
@@ -4681,9 +4946,10 @@ JSC3D.Mesh.prototype.rotate = function(rotation) {
 	this.compiled = null;
 };
 
-JSC3D.Mesh.prototype.translate = function(translation) {
+JSC3D.Mesh.prototype.translate = function(translation, translationMode) {
 	var xformMat = new JSC3D.Matrix3x4;
 
+	// TODO: implement translationMode
 	/* store translation */
 	this.translation[0]+=translation[0];
 	this.translation[1]+=translation[1];
@@ -4696,7 +4962,13 @@ JSC3D.Mesh.prototype.translate = function(translation) {
 	this.compiled = null;
 };
 
-JSC3D.Mesh.prototype.scale = function(scaling) {
+/** 
+	scaleMode, resizeMode:
+	"plus":   mesh.aabb.minX, .minY, .minZ remains untouched
+	"minus":  mesh.aabb.maxX, .maxY, .maxZ remains untouched
+	"center": mesh will resize centered to mesh.aabb.center
+*/
+JSC3D.Mesh.prototype.scale = function(scaling, scaleMode) {
 	var xformMat = new JSC3D.Matrix3x4;
 	var meshBox = this.aabb;
 	var actualCenter = meshBox.center();
@@ -4722,7 +4994,7 @@ JSC3D.Mesh.prototype.scale = function(scaling) {
 
 	/* translate */
 	var shiftX = 0, shiftY = 0, shiftZ = 0;
-	switch (this.resizeMode) {
+	switch (scaleMode) {
 		case 'plus':
 			shiftX = meshBox.minX-(meshBox.minX*pctX);
 			shiftY = meshBox.minY-(meshBox.minY*pctY);
@@ -4746,11 +5018,9 @@ JSC3D.Mesh.prototype.scale = function(scaling) {
 	this.compiled = null;
 	
 	var newSize = [meshBox.maxX - meshBox.minX, meshBox.maxY - meshBox.minY, meshBox.maxZ - meshBox.minZ];
-	if(JSC3D.console)
-		JSC3D.console.logInfo('Mesh resize: ' + JSON.stringify(newSize));
 };
 
-JSC3D.Mesh.prototype.resize = function(size) {
+JSC3D.Mesh.prototype.resize = function(size, resizeMode) {
 	var xformMat = new JSC3D.Matrix3x4;
 	var meshBox = this.aabb;
 	var actualSize = [meshBox.maxX - meshBox.minX, meshBox.maxY - meshBox.minY, meshBox.maxZ - meshBox.minZ];
@@ -4778,7 +5048,7 @@ JSC3D.Mesh.prototype.resize = function(size) {
 
 	/* translate */
 	var shiftX = 0, shiftY = 0, shiftZ = 0;
-	switch (this.resizeMode) {
+	switch (resizeMode) {
 		case 'plus':
 			shiftX = meshBox.minX-(meshBox.minX*pctX);
 			shiftY = meshBox.minY-(meshBox.minY*pctY);
@@ -4802,8 +5072,6 @@ JSC3D.Mesh.prototype.resize = function(size) {
 	this.compiled = null;
 	
 	var newSize = [meshBox.maxX - meshBox.minX, meshBox.maxY - meshBox.minY, meshBox.maxZ - meshBox.minZ];
-	if(JSC3D.console)
-		JSC3D.console.logInfo('Mesh resize: ' + JSON.stringify(newSize));
 }
 
 JSC3D.Mesh.prototype.shiftX = function() {
@@ -4848,7 +5116,7 @@ JSC3D.Mesh.prototype.flipX = function() {
 	
 	/* store rotation with smallest angle */
 	var s = 180, r = 90, z = 0;
-	var rotY, degY, rotMatY = this.rotation[1];
+	var rotY, degY, rotMatY = this.rotation[1]; /* Mesh flipY */
 	
 	if (rotMatY < z && rotMatY >= -r) {
 		rotY = -s-2*rotMatY;
@@ -4867,10 +5135,7 @@ JSC3D.Mesh.prototype.flipX = function() {
 		degY = rotY;
 	}
 
-	this.rotation[1]+=degY;
-	
-	if(JSC3D.console)
-		JSC3D.console.logInfo('Mesh rotation: ' + JSON.stringify(this.rotation));
+	this.rotation[1]+=degY; /* Mesh flipX */
 	
 	/* rotate normals */ 
 	normalMat.rotateAboutYAxis(rotY);
@@ -4910,7 +5175,7 @@ JSC3D.Mesh.prototype.flipZ = function() {
 	
 	/* store rotation with smallest angle */
 	var f = 360, s = 180, r = 90, z = 0;
-	var rotY, degY, rotMatY = this.rotation[1];
+	var rotY, degY, rotMatY = this.rotation[1]; /* Mesh flipZ */
 
 	if (rotMatY < z && rotMatY >= -r) {
 		rotY = -2*rotMatY; 
@@ -4933,10 +5198,7 @@ JSC3D.Mesh.prototype.flipZ = function() {
 		degY = z; 
 	}
 
-	this.rotation[1]+=degY;
-	
-	if(JSC3D.console)
-		JSC3D.console.logInfo('Mesh rotation: ' + JSON.stringify(this.rotation));
+	this.rotation[1]+=degY; /* Mesh flipZ */
 	
 	/* rotate normals */ 
 	normalMat.rotateAboutYAxis(rotY);
@@ -4968,6 +5230,10 @@ JSC3D.Mesh.prototype.getGroupName = function() {
 	return this.name.substring(0, this.name.lastIndexOf('-'));
 };
 
+JSC3D.Mesh.prototype.getGroupIndex = function() {
+	return this.name.substring(this.name.lastIndexOf('-')+1);
+};
+
 JSC3D.Mesh.prototype.setGroupName = function(newGroupName, newGroupIndex) {
 	var groupName = this.getGroupName();
 	var groupIndex = this.name.substring(this.name.lastIndexOf('-'));
@@ -4976,87 +5242,26 @@ JSC3D.Mesh.prototype.setGroupName = function(newGroupName, newGroupIndex) {
 };
 /* Mesh grouping by name --- */
 
-/* Mesh clone +++ */
-JSC3D.Mesh.prototype.clone = function(scene, rotation, translation, size) {
-	var newMesh = new JSC3D.Mesh;
-	newMesh.name = this.name;
-	newMesh.creaseAngle = this.creaseAngle;
-	newMesh.isDoubleSided = this.isDoubleSided;
-	newMesh.isEnvironmentCast = this.isEnvironmentCast; /* obsolete */
-	newMesh.renderMode = this.renderMode;
-	newMesh.rotationMode = scene.meshRotationMode;
-	newMesh.resizeMode = scene.meshResizeMode;
-	newMesh.visible = this.visible;
-	
-	var xformMat = new JSC3D.Matrix3x4;
-	var normalMat = new JSC3D.Matrix3x4;
-	var vertexRotMat = new JSC3D.Matrix3x4;
-
-	var pivot;
-	switch (newMesh.rotationMode) {
-		case 'axis':
-			//pivot = [newMesh.translation[0],newMesh.translation[1],newMesh.translation[2]];
-			break;
-		case 'scene':
-			break;
-		case 'center':
-			pivot = this.aabb.center();
-			break;
-	}
-	
-	if (rotation) {
-		if (pivot) vertexRotMat.translate(-pivot[0], -pivot[1], -pivot[2]);	
-		if (!!rotation[0]) { 
-			normalMat.rotateAboutXAxis(rotation[0]); 
-			vertexRotMat.rotateAboutXAxis(rotation[0]); 
-		}
-		if (!!rotation[1]) {
-			normalMat.rotateAboutYAxis(rotation[1]); 
-			vertexRotMat.rotateAboutYAxis(rotation[1]); 
-		}
-		if (!!rotation[2]) { 
-			normalMat.rotateAboutZAxis(rotation[2]); 
-			vertexRotMat.rotateAboutZAxis(rotation[2]); 
-		}
-		if (pivot) vertexRotMat.translate(pivot[0], pivot[1], pivot[2]);
-	}
-	
-	if (translation) xformMat.translate(translation[0], translation[1], translation[2]);
-	if (size) xformMat.scale(size[0], size[1], size[2]);
-	
-	xformMat.multiply(vertexRotMat);
-	newMesh.indexBuffer = this.indexBuffer;
-	newMesh.vertexBuffer = new Array(this.vertexBuffer.length);
-	newMesh.faceNormalBuffer = new Array(this.faceNormalBuffer.length);
-
-	JSC3D.Math3D.transformVectors(xformMat, this.vertexBuffer, newMesh.vertexBuffer);
-	JSC3D.Math3D.transformVectors(normalMat, this.faceNormalBuffer, newMesh.faceNormalBuffer);
-
-	newMesh.mtllib = this.mtllib;
-	newMesh.mtl = this.mtl;
-	newMesh.setMaterial(this.material);
-	newMesh.setTexture(this.texture);
-	newMesh.texCoordBuffer = []; /* TODO ? */
-	newMesh.texCoordIndexBuffer = []; /* TODO ? */
-	newMesh.init();
-	scene.addChild(newMesh);
-	return newMesh;
-};
-/* Mesh clone --- */
-
 /**
 	@class Material
 
 	This class implements material which describes the feel and look of a mesh.
  */
-JSC3D.Material = function(name, ambientColor, diffuseColor, transparency, simulateSpecular, environmentCast) {
+JSC3D.Material = function(name, ambientColor, diffuseColor, specularColor, ambientReflection, diffuseReflection, specularReflection, shininess, transparency, environmentCast, lightingCast) {
 	this.name = name || '';
 	this.diffuseColor = diffuseColor || 0x7f7f7f;
 	// default ambient color will be of 1/8 the intensity of the diffuse color
 	this.ambientColor = (typeof ambientColor) == 'number' ? ambientColor : (((this.diffuseColor & 0xff0000) >> 3) & 0xff0000 | ((this.diffuseColor & 0xff00) >> 3) & 0xff00 | ((this.diffuseColor & 0xff) >> 3));
-	this.transparency = transparency || 0;
-	this.isEnvironmentCast = environmentCast || false; /* EnvironmentCast of Material */
-	this.simulateSpecular = simulateSpecular || false;
+	this.specularColor = (typeof specularColor) == 'number' ? specularColor : diffuseColor; /* Lighting */
+	this.ambientReflection = (typeof ambientReflection) == 'number' ? ambientReflection : .2; /* Lighting: 0..1 */
+	this.diffuseReflection = (typeof diffuseReflection) == 'number' ? diffuseReflection : 1; /* Lighting: 0..1 */
+	this.specularReflection = (typeof specularReflection) == 'number' ? specularReflection : 0; /* Lighting: 0..1 */
+	this.shininess = (typeof shininess) == 'number' ? shininess : 1; /* Lighting: 1..128 */
+	
+	this.simulateSpecular = (this.specularReflection > 0.0) ? true : false;
+	this.transparency = (typeof transparency) == 'number' ? transparency : 0;
+	this.isEnvironmentCast = (typeof environmentCast) == 'boolean' ? environmentCast : false; /* EnvironmentCast of Material */
+	this.isLightingCast = (typeof lightingCast) == 'boolean' ? lightingCast : true; /* LightingCast of Material */
 	this.palette = null;
 };
 
@@ -5121,6 +5326,13 @@ JSC3D.Material.prototype.generatePalette = function() {
 			var r = Math.max(ambientR, i * diffuseR / 256);
 			var g = Math.max(ambientG, i * diffuseG / 256);
 			var b = Math.max(ambientB, i * diffuseB / 256);
+			
+			/* Lighting */
+			var x = i / 256;
+			var center = 0, amplitude = 1;
+			var mul = 1+Math.exp(-Math.pow((x*2)-center,2))*amplitude; 
+			r *= mul; g *= mul; b *= mul;
+			
 			if(r > 255)
 				r = 255;
 			if(g > 255)
@@ -5139,7 +5351,13 @@ JSC3D.Material.prototype.generatePalette = function() {
 JSC3D.Material.prototype.name = '';
 JSC3D.Material.prototype.ambientColor = 0;
 JSC3D.Material.prototype.diffuseColor = 0x7f7f7f;
+JSC3D.Material.prototype.specularColor = 0x7f7f7f; /* Lighting */
+JSC3D.Material.prototype.ambientReflection = .2; /* Lighting */
+JSC3D.Material.prototype.diffuseReflection = 1; /* Lighting */
+JSC3D.Material.prototype.specularReflection = 0; /* Lighting */
+JSC3D.Material.prototype.shininess = 50; /* Lighting */
 JSC3D.Material.prototype.transparency = 0;
+JSC3D.Material.prototype.isLightingCast = true; /* LightingCast of Material */
 JSC3D.Material.prototype.isEnvironmentCast = false; /* EnvironmentCast of Material */
 JSC3D.Material.prototype.simulateSpecular = false;
 JSC3D.Material.prototype.palette = null;
@@ -5158,6 +5376,8 @@ JSC3D.Texture = function(name, onready) {
 	this.mipmaps = null;
 	this.mipentries = null;
 	this.hasTransparency = false;
+	this.isLightingCast = true; /* LightingCast of Texture */
+	this.isEnvironmentCast = false; /* EnvironmentCast of Texture */
 	this.srcUrl = '';
 	this.onready = (onready && typeof(onready) == 'function') ? onready : null;
 };
@@ -5344,6 +5564,8 @@ JSC3D.Texture.prototype.name = '';
 JSC3D.Texture.prototype.data = null;
 JSC3D.Texture.prototype.mipmaps = null;
 JSC3D.Texture.prototype.mipentries = null;
+JSC3D.Texture.prototype.isLightingCast = true; /* LightingCast of Texture */
+JSC3D.Texture.prototype.isEnvironmentCast = false; /* EnvironmentCast of Texture */
 /**
  * {Number} Width of the texture in pixels. Read only.
  */
@@ -5366,6 +5588,21 @@ JSC3D.Texture.prototype.srcUrl = '';
 JSC3D.Texture.prototype.onready = null;
 JSC3D.Texture.cv = null;
 
+/**
+	Lighting
+ */
+JSC3D.Light = function(name,position,ambientColor,diffuseColor,enabled) {
+	var diffuseR = (diffuseColor & 0xff0000) >> 16;
+	var diffuseG = (diffuseColor & 0xff00) >> 8;
+	var diffuseB = diffuseColor & 0xff;
+	var ambient = (typeof ambientColor) == 'number' ? ambientColor : ((diffuseR >> 3) & 0xff0000 | (diffuseG >> 3) & 0xff00 | (diffuseB >> 3));
+	this.name = name || 'light';
+	this.position = position || [0,0,0];
+	this.transformedPosition = [0,0,0];
+	this.ambientColor = ambient; 
+	this.diffuseColor = diffuseColor;
+	this.enabled = enabled;
+};
 
 /**
 	@class AABB
@@ -5566,6 +5803,11 @@ JSC3D.Matrix3x4.prototype.multiply = function(mult) {
 	this.m20 = m20; this.m21 = m21; this.m22 = m22; this.m23 = m23;
 };
 
+JSC3D.Matrix3x4.prototype.clone = function(mat) {
+	this.m00 = mat.m00; this.m01 = mat.m01; this.m02 = mat.m02; this.m03 = mat.m03;
+	this.m10 = mat.m10; this.m11 = mat.m11; this.m12 = mat.m12; this.m13 = mat.m13;
+	this.m20 = mat.m20; this.m21 = mat.m21; this.m22 = mat.m22; this.m23 = mat.m23;
+};
 
 /**
 	@class Math3D
@@ -5578,7 +5820,7 @@ JSC3D.Math3D = {
 		Transform vectors using the given matrix.
 		@param {JSC3D.Matrix3x4} mat the transformation matrix.
 		@param {Array} vecs a batch of vectors to be transform.
-		@param {Array} xfvecs where to output the transformed vetors.
+		@param {Array} xfvecs where to output the transformed vectors.
 	 */
 	transformVectors: function(mat, vecs, xfvecs) {
 		for(var i=0; i<vecs.length; i+=3) {
