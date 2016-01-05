@@ -158,7 +158,7 @@ JSC3D.OpenCTMLoader = function(onload, onerror, onprogress, onresource) {
 	if(isIE10Compatible)
 		xhr.responseType = 'blob';	// use blob method to deal with CTM files for IE >= 10
 	else if(isIE)
-		xhr.setRequestHeader("Accept-Charset", "x-user-defined");
+		xhr.setRequestHeader('Accept-Charset', 'x-user-defined');
 	else
 		xhr.overrideMimeType('text\/plain; charset=x-user-defined');
 
@@ -176,6 +176,10 @@ JSC3D.OpenCTMLoader = function(onload, onerror, onprogress, onresource) {
 						blobReader.onload = function(event) {
 							var scene = new JSC3D.Scene;
 							scene.srcUrl = urlName;
+							/* Mesh grouping by name +++ */
+							var sceneName = urlName.replace(/^.*(\\|\/|\:)/, '');
+							scene.name = sceneName.substr(0,sceneName.lastIndexOf('.')) || sceneName + '';
+							/* Mesh grouping by name --- */
 							self.parseCTM(scene, event.target.result);
 							self.onload(scene);
 						};
@@ -186,6 +190,10 @@ JSC3D.OpenCTMLoader = function(onload, onerror, onprogress, onresource) {
 						// this would work on IE6~IE9
 						var scene = new JSC3D.Scene;
 						scene.srcUrl = urlName;
+						/* Mesh grouping by name +++ */
+						var sceneName = urlName.replace(/^.*(\\|\/|\:)/, '');
+						scene.name = sceneName.substr(0,sceneName.lastIndexOf('.')) || sceneName + '';
+						/* Mesh grouping by name --- */
 						try {
 							self.parseCTM(scene, JSC3D.Util.ieXHRResponseBodyToString(this.responseBody));
 						} catch(e) {}
@@ -193,6 +201,10 @@ JSC3D.OpenCTMLoader = function(onload, onerror, onprogress, onresource) {
 					}
 					else {
 						var scene = new JSC3D.Scene;
+						/* Mesh grouping by name +++ */
+						var sceneName = urlName.replace(/^.*(\\|\/|\:)/, '');
+						scene.name = sceneName.substr(0,sceneName.lastIndexOf('.')) || sceneName + '';
+						/* Mesh grouping by name --- */
 						scene.srcUrl = urlName;
 						self.parseCTM(scene, this.responseText);
 						self.onload(scene);
@@ -212,7 +224,7 @@ JSC3D.OpenCTMLoader = function(onload, onerror, onprogress, onresource) {
 	if(this.onprogress) {
 		this.onprogress('Loading CTM file ...', 0);
 		xhr.onprogress = function(event) {
-			self.onprogress('Loading CTM file ...', event.loaded / event.total);
+			self.onprogress('Loading CTM file ...', event.position / event.totalSize);
 		};
 	}
 
@@ -239,6 +251,7 @@ JSC3D.OpenCTMLoader.prototype.parseCTM = function(scene, data) {
 	var ctm = new JSC3D.CTM.File(new JSC3D.CTM.Stream(data));
 
 	var mesh  = new JSC3D.Mesh;
+	var defaultMeshName = (scene.name || 'ctm'); /* Mesh grouping by name */
 
 	// read triangle indices
 	mesh.indexBuffer = new Int32Array(4 * ctm.body.indices.length / 3);

@@ -207,7 +207,7 @@ JSC3D.ObjLoader.prototype.loadMtlFile = function(scene, urlPath, fileName) {
 JSC3D.ObjLoader.prototype.parseObj = function(scene, data) {
 	var meshes = {};
 	var mtllibs = [];
-	var namePrefix = (scene.name || "obj") + "-"; /* Mesh grouping by name */
+	var defaultMeshName = (scene.name || 'obj'); /* Mesh grouping by name */
 	var meshIndex = 0;
 	var curMesh = null;
 	var curMtllibName = '';
@@ -217,9 +217,9 @@ JSC3D.ObjLoader.prototype.parseObj = function(scene, data) {
 	var tempTexCoordBuffer = [];	// temporary buffer as container for all vertex texture coords
 
 	// create a default mesh to hold all faces that are not associated with any mtl.
-	var defaultMeshName = namePrefix + meshIndex++;
 	var defaultMesh = new JSC3D.Mesh;
 	defaultMesh.name = defaultMeshName;
+	defaultMesh.groupIndex = meshIndex++; /* Mesh grouping by name */
 	defaultMesh.indexBuffer = [];
 	meshes['nomtl'] = defaultMesh;
 	curMesh = defaultMesh;
@@ -294,7 +294,9 @@ JSC3D.ObjLoader.prototype.parseObj = function(scene, data) {
 					if(!mesh) {
 						// create a new mesh to accept faces using the same mtl
 						mesh = new JSC3D.Mesh;
-						mesh.name = namePrefix + meshIndex++;
+						//mesh.name = namePrefix + meshIndex++;
+						mesh.name = defaultMeshName; /* Mesh grouping by name */
+						mesh.groupIndex = meshIndex++; /* Mesh grouping by name */
 						mesh.indexBuffer = [];
 						mesh.mtllib = curMtllibName;
 						mesh.mtl = curMtlName;
