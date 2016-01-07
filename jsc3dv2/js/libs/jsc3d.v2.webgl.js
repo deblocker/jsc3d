@@ -399,6 +399,11 @@ JSC3D.WebGLRenderBackend.prototype.beginFrame = function(definition, hasBackgrou
 
 	/* Viewer Resize +++ */
 	if (frameW != this.frameWidth || frameH != this.frameHeight) {
+		if(JSC3D.console) {
+			JSC3D.console.logInfo('frameWidth: ' + frameW + ' - oldFrameWidth: ' + this.frameWidth);
+			JSC3D.console.logInfo('frameHeight: ' + frameH + ' - oldFrameHeight: ' + this.frameHeight);
+		}
+
 		if(this.backFB) {
 			destroyFB(gl, this.backFB);
 			this.backFB = null;

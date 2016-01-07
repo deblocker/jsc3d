@@ -299,6 +299,9 @@ JSC3D.Viewer.prototype.init = function() {
 			this.webglBackend.isLightingOn = (this.lightingMode != 'standard'); /* Lighting */
 		} catch(e){}
 	}
+	if(JSC3D.console) JSC3D.console.logInfo('viewer.useWebGL: ' + this.useWebGL);
+	if(JSC3D.console) JSC3D.console.logInfo('PlatformInfo.supportWebGL: ' + JSC3D.PlatformInfo.supportWebGL);
+
 
 	// Fall back to software rendering when WebGL is not assigned or unavailable.
 	if(!this.webglBackend) {
@@ -1371,6 +1374,11 @@ JSC3D.Viewer.prototype.resize = function() {
 	}
 	
 	if (frameWidth != oldFrameWidth || frameHeight != oldFrameHeight) {
+		
+		if(JSC3D.console) {
+			JSC3D.console.logInfo('Resize Canvas from :' + oldFrameWidth + 'x' + oldFrameHeight + ' to: ' + frameWidth + 'x' + frameHeight);
+		}
+		
 		this.canvas.width = w;
 		this.canvas.height = h;
 		var ratio = frameWidth / oldFrameWidth;
@@ -4194,6 +4202,14 @@ JSC3D.Scene.prototype.getMeshes = function(groupName) {
 	return meshes;
 };
 
+JSC3D.Scene.prototype.toggleMeshes = function(groupName, visibility) {
+	var meshes = this.getMeshes(groupName);
+	for(var i=0, l=meshes.length; i<l; i++) {
+		var mesh = meshes[i];
+		mesh.visible = visibility;
+	}
+};
+
 JSC3D.Scene.prototype.renameMeshes = function(groupName, newGroupName) {
 	var meshes = this.getMeshes(groupName);
 	for(var i=0, l=meshes.length; i<l; i++) {
@@ -4223,6 +4239,14 @@ JSC3D.Scene.prototype.scaleMeshes = function(groupName, scaling, scaleMode) {
 	for(var i=0, l=meshes.length; i<l; i++) {
 		var mesh = meshes[i];
 		mesh.scale(scaling, scaleMode);
+	}
+};
+
+JSC3D.Scene.prototype.resizeMeshes = function(groupName, size, resizeMode) {
+	var meshes = this.getMeshes(groupName);
+	for(var i=0, l=meshes.length; i<l; i++) {
+		var mesh = meshes[i];
+		mesh.resize(size, resizeMode);
 	}
 };
 
@@ -4905,6 +4929,8 @@ JSC3D.Mesh.prototype.rotate = function(rotation, rotationMode) {
 	if (maxZ < -s) degZ += f; if (maxZ >= s) degZ -= f;
 	this.rotation[0]+=degX;this.rotation[1]+=degY;this.rotation[2]+=degZ; /* Mesh rotate */
 	
+	//if(JSC3D.console) JSC3D.console.logInfo('Mesh rotation: ' + JSON.stringify(this.rotation));
+	
 	/* rotate normals */
 	if (!!degX) normalMat.rotateAboutXAxis(degX);
 	if (!!degY) normalMat.rotateAboutYAxis(degY);
@@ -4996,6 +5022,7 @@ JSC3D.Mesh.prototype.scale = function(scaling, scaleMode) {
 	this.compiled = null;
 	
 	var newSize = [meshBox.maxX - meshBox.minX, meshBox.maxY - meshBox.minY, meshBox.maxZ - meshBox.minZ];
+	//if(JSC3D.console) JSC3D.console.logInfo('Mesh resize: ' + JSON.stringify(newSize));
 };
 
 JSC3D.Mesh.prototype.transform = function(rotation, rotationMode, translation, translationMode, scaling, scaleMode) {
@@ -5129,6 +5156,7 @@ JSC3D.Mesh.prototype.resize = function(size, resizeMode) {
 	this.compiled = null;
 	
 	var newSize = [meshBox.maxX - meshBox.minX, meshBox.maxY - meshBox.minY, meshBox.maxZ - meshBox.minZ];
+	//if(JSC3D.console) JSC3D.console.logInfo('Mesh resize: ' + JSON.stringify(newSize));
 }
 
 JSC3D.Mesh.prototype.shiftX = function() {
@@ -5194,6 +5222,8 @@ JSC3D.Mesh.prototype.flipX = function() {
 
 	this.rotation[1]+=degY; /* Mesh flipX */
 	
+	//if(JSC3D.console) JSC3D.console.logInfo('Mesh rotation: ' + JSON.stringify(this.rotation));
+	
 	/* rotate normals */ 
 	normalMat.rotateAboutYAxis(rotY);
 	/* generate the rotation matrix, using the center point of mesh's aabb as the the pivot */
@@ -5257,6 +5287,8 @@ JSC3D.Mesh.prototype.flipZ = function() {
 
 	this.rotation[1]+=degY; /* Mesh flipZ */
 	
+	//if(JSC3D.console) JSC3D.console.logInfo('Mesh rotation: ' + JSON.stringify(this.rotation));
+	
 	/* rotate normals */ 
 	normalMat.rotateAboutYAxis(rotY);
 	/* generate the rotation matrix, using the center point of mesh's aabb as the the pivot */
@@ -5291,7 +5323,6 @@ JSC3D.Mesh.prototype.clone = function(newName, rotation, rotationMode, translati
 	newMesh.creaseAngle = this.creaseAngle;
 	newMesh.isDoubleSided = this.isDoubleSided;
 	newMesh.renderMode = this.renderMode;
-	newMesh.isLightingCast = this.isLightingCast; /* Lighting */
 	newMesh.axis = [this.axis[0],this.axis[1],this.axis[2]];
 	//newMesh.rotation = [this.rotation[0],this.rotation[1],this.rotation[2]];
 	//newMesh.translation = [this.translation[0],this.translation[1],this.translation[2]];
