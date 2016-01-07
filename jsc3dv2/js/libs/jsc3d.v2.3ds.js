@@ -334,7 +334,7 @@ JSC3D.Autodesk3DSLoader.prototype.parseFaceList = function (reader) {
 	}
 
 	this._cur_obj.smoothingGroups = [];
-	for ( index = 0 ; index <this._cur_obj.facesCount;index++){
+	for ( var index = 0 ; index <this._cur_obj.facesCount;index++){
 		this._cur_obj.smoothingGroups[index] = 0;
 	}
 };
