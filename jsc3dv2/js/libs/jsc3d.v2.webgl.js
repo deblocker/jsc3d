@@ -43,30 +43,6 @@ var JSC3D = JSC3D || {};
  * This class implements an optional WebGL render back-end for {JSC3D.Viewer}. If enabled, it takes 
  * place of {JSC3D.Viewer}'s default software rendering module and provides high performance rendering.
  */
- 
-function throwOnGLError(err, funcName, args) {
-	if(JSC3D.console)
-		JSC3D.console.logError(WebGLDebugUtils.glEnumToString(err) + ' in : ' + funcName);
-};
- 
-function logGLCall(functionName, args) {   
-	if(JSC3D.console)
-		JSC3D.console.logInfo('gl.' + functionName + '(' + WebGLDebugUtils.glFunctionArgsToString(functionName, args) + ')');
-} 
-
-function validateNoneOfTheArgsAreUndefined(functionName, args) {
-	for (var ii = 0; ii < args.length; ++ii) {
-		if (args[ii] === undefined) {
-			if(JSC3D.console)
-				JSC3D.console.logError('undefined passed to gl.' + functionName + '(' + WebGLDebugUtils.glFunctionArgsToString(functionName, args) + ')');
-		}
-	}
-} 
-
-function logAndValidate(functionName, args) {
-	//logGLCall(functionName, args);
-	validateNoneOfTheArgsAreUndefined(functionName, args);
-}
 
 JSC3D.WebGLRenderBackend = function(canvas, releaseLocalBuffers) {
 	this.canvas = canvas;

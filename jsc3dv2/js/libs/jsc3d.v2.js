@@ -196,7 +196,8 @@ JSC3D.Viewer = function(canvas, parameters) {
 	// setup input handlers.
 	// compatibility for touch devices is taken into account
 	var self = this;
-	if(!JSC3D.PlatformInfo.isTouchDevice) {
+	//if(!JSC3D.PlatformInfo.isTouchDevice) {
+	if(!JSC3D.PlatformInfo.isTouchCapable) {
 		this.canvas.addEventListener('mousedown', function(e){self.mouseDownHandler(e);}, false);
 		this.canvas.addEventListener('mouseup', function(e){self.mouseUpHandler(e);}, false);
 		this.canvas.addEventListener('mousemove', function(e){self.mouseMoveHandler(e);}, false);
@@ -299,9 +300,6 @@ JSC3D.Viewer.prototype.init = function() {
 			this.webglBackend.isLightingOn = (this.lightingMode != 'standard'); /* Lighting */
 		} catch(e){}
 	}
-	if(JSC3D.console) JSC3D.console.logInfo('viewer.useWebGL: ' + this.useWebGL);
-	if(JSC3D.console) JSC3D.console.logInfo('PlatformInfo.supportWebGL: ' + JSC3D.PlatformInfo.supportWebGL);
-
 
 	// Fall back to software rendering when WebGL is not assigned or unavailable.
 	if(!this.webglBackend) {
@@ -690,12 +688,13 @@ JSC3D.Viewer.prototype.setSphereMapFromUrl = function(sphereMapUrl) {
 /**
 	Textures preload & materials collection
  */
-JSC3D.Viewer.prototype.addTexture = function(textureUrlName) {
+JSC3D.Viewer.prototype.addTexture = function(textureUrlName, lightingCast) {
 	var fileName = textureUrlName.replace(/^.*(\\|\/|\:)/, '');
 	var textureName = fileName.substr(0,fileName.lastIndexOf('.')) || fileName + '';
 	var texture = new JSC3D.Texture(textureName);
 	texture.createFromUrl(textureUrlName);
-	
+	texture.isLightingCast = lightingCast || false;
+	texture.isEnvironmentCast = false;
 	this.textures.push(texture);
 };
 
@@ -703,10 +702,12 @@ JSC3D.Viewer.prototype.addTexture = function(textureUrlName) {
 	Textures preload & materials collection
  */
 JSC3D.Viewer.prototype.getTexture = function(textureName) {
-	for(var i=0, l=this.textures.length; i<l; i++) {
-		var texture = this.textures[i];
-		if(texture.name == textureName)
-			return texture;
+	if (textureName) {
+		for(var i=0, l=this.textures.length; i<l; i++) {
+			var texture = this.textures[i];
+			if(texture.name == textureName)
+				return texture;
+		}
 	}
 	return null;
 };
@@ -724,10 +725,12 @@ JSC3D.Viewer.prototype.addMaterial = function(name, ambientColor, diffuseColor, 
 	Textures preload & materials collection
  */
 JSC3D.Viewer.prototype.getMaterial = function(materialName) {
-	for(var i=0, l=this.materials.length; i<l; i++) {
-		var material = this.materials[i];
-		if(material.name == materialName)
-			return material;
+	if (materialName) {
+		for(var i=0, l=this.materials.length; i<l; i++) {
+			var material = this.materials[i];
+			if(material.name == materialName)
+				return material;
+		}
 	}
 	return null;
 };
@@ -803,7 +806,8 @@ JSC3D.Viewer.prototype.resetScene = function() {
 	this.currentMesh = null; /* Selected mesh */
 	this.rotMatrix.identity();
 	this.scene.isLightingOn = (this.lightingMode != 'standard');
-	this.setup3PointLighting(this.lightingMode, this.showLights); 
+	if (this.scene.isLightingOn)
+		this.setup3PointLighting(this.lightingMode, this.showLights); 
 	this.sceneRotation = 0; /* Scene Rotation */
 	this.rotateAboutXAxis(this.initRotX); /* Scene Rotation */
 	this.rotateAboutYAxis(this.initRotY); /* Scene Rotation */
@@ -1265,7 +1269,6 @@ JSC3D.Viewer.prototype.gestureHandler = function(e) {
 	/* Selected mesh group name */
 	var groupName = info.mesh ? info.mesh.getGroupName() : null; 
 
-	//console.log('GESTURE EVENT Type: ' + e.type);
 	switch(e.type) {
 	case 'touch':
 		if(this.onmousedown)
@@ -1356,6 +1359,8 @@ JSC3D.Viewer.prototype.resize = function() {
 	var h = cb[1];
 	var oldFrameWidth = this.frameWidth, oldFrameHeight = this.frameHeight;
 	
+	if (w*h == 0)
+		return;
 	var frameWidth = 0, frameHeight = 0;
 	switch (this.definition) {
 		case 'low':
@@ -1374,10 +1379,6 @@ JSC3D.Viewer.prototype.resize = function() {
 	}
 	
 	if (frameWidth != oldFrameWidth || frameHeight != oldFrameHeight) {
-		
-		if(JSC3D.console) {
-			JSC3D.console.logInfo('Resize Canvas from :' + oldFrameWidth + 'x' + oldFrameHeight + ' to: ' + frameWidth + 'x' + frameHeight);
-		}
 		
 		this.canvas.width = w;
 		this.canvas.height = h;
@@ -1435,24 +1436,24 @@ JSC3D.Viewer.prototype.setup3PointLighting = function(lightingMode,showLights) {
 JSC3D.Viewer.prototype.rotateLights = function() {
 	if (!this.scene) return;
 
-	var light = this.scene.getMeshes('light-1')[0];
-	light.rotate([0,1,0]);
-	var meshCenter = light.aabb.center();
-	this.scene.lights[0].position = [meshCenter[0],meshCenter[1],meshCenter[2]];
-	this.scene.lights[0].compiled = null;
-	
-	var light = this.scene.getMeshes('light-2')[0];
-	light.rotate([0,1,0]);
-	var meshCenter = light.aabb.center();
-	this.scene.lights[1].position = [meshCenter[0],meshCenter[1],meshCenter[2]];
-	this.scene.lights[1].compiled = null;
-
-	var light = this.scene.getMeshes('light-3')[0];
-	light.rotate([0,0,1]);
-	var meshCenter = light.aabb.center();
-	this.scene.lights[2].position = [meshCenter[0],meshCenter[1],meshCenter[2]];
-	this.scene.lights[2].compiled = null;
-	
+	var lights = this.scene.getMeshes('light');
+	for (var i=0,l=lights.length-1; i<l;i++) {
+		var light = lights[i];
+		switch (light.groupIndex) {
+		case 1:
+			light.rotate([0,1,1]);
+			break;
+		case 2:
+			light.rotate([1,1,0]);
+			break;
+		case 3:
+			light.rotate([0,1,1]);
+			break;
+		}
+		var meshCenter = light.aabb.center();
+		this.scene.lights[i].position = [meshCenter[0],meshCenter[1],meshCenter[2]];
+		this.scene.lights[i].compiled = null;
+	}
 	this.needUpdate = true;
 };
 
@@ -1584,7 +1585,8 @@ JSC3D.Viewer.prototype.setupScene = function(scene) {
 	/* Lighting +++ */
 	this.scene.rotMat.copy(this.rotMatrix);
 	this.scene.isLightingOn = (this.lightingMode != 'standard');
-	this.setup3PointLighting(this.lightingMode, this.showLights); 
+	if (this.scene.isLightingOn)
+		this.setup3PointLighting(this.lightingMode, this.showLights); 
 	/* Lighting --- */
 	
 	this.isLoaded = true;
@@ -3042,7 +3044,7 @@ JSC3D.Viewer.prototype.renderTextureFlat = function(mesh) {
 		}
 		else {
 			var color = 0xff000000 | palette[~~(xformedNz * 255)];
-
+			
 			var v0, v1, v2;
 			var t0, t1, t2;
 			v0 = ibuf[j] * 3;
@@ -4234,6 +4236,14 @@ JSC3D.Scene.prototype.translateMeshes = function(groupName, translation, transla
 	}
 };
 
+JSC3D.Scene.prototype.relocateMeshes = function(groupName, translation, translationMode) {
+	var meshes = this.getMeshes(groupName);
+	for(var i=0, l=meshes.length; i<l; i++) {
+		var mesh = meshes[i];
+		mesh.relocate(translation, translationMode);
+	}
+};
+
 JSC3D.Scene.prototype.scaleMeshes = function(groupName, scaling, scaleMode) {
 	var meshes = this.getMeshes(groupName);
 	for(var i=0, l=meshes.length; i<l; i++) {
@@ -4255,6 +4265,22 @@ JSC3D.Scene.prototype.transformMeshes = function(groupName, rotation, rotationMo
 	for(var i=0, l=meshes.length; i<l; i++) {
 		var mesh = meshes[i];
 		mesh.transform(rotation, rotationMode, translation, translationMode, scaling, scaleMode);
+	}
+};
+
+JSC3D.Scene.prototype.shiftMeshesX = function(groupName) {
+	var meshes = this.getMeshes(groupName);
+	for(var i=0, l=meshes.length; i<l; i++) {
+		var mesh = meshes[i];
+		mesh.shiftX();
+	}
+};
+
+JSC3D.Scene.prototype.shiftMeshesZ = function(groupName) {
+	var meshes = this.getMeshes(groupName);
+	for(var i=0, l=meshes.length; i<l; i++) {
+		var mesh = meshes[i];
+		mesh.shiftZ();
 	}
 };
 
@@ -4386,7 +4412,9 @@ JSC3D.Scene.prototype.addLight = function(posX, posY, posZ, ambientColor, diffus
 			JSC3D.console.logError('Cannot add another light. Max number of lights reached!');
 	}
 		
-	var light = new JSC3D.Light('light-'+(id+1),[posX, posY, posZ], ambientColor, diffuseColor, enabled);
+	//var light = new JSC3D.Light('light-'+(id+1),[posX, posY, posZ], ambientColor, diffuseColor, enabled);
+	var light = new JSC3D.Light('light',[posX, posY, posZ], ambientColor, diffuseColor, enabled);
+	light.groupIndex = id+1;
 	this.lights.push(light);
 	var mesh = this.makeLightSphere(diffuseColor, 'flat');
 	mesh.isPositionFixed = true;
@@ -4504,7 +4532,8 @@ JSC3D.Mesh.prototype.isTrivial = function() {
 	@param {JSC3D.Material} material the material object.
  */
 JSC3D.Mesh.prototype.setMaterial = function(material) {
-	this.material = material;
+	if (material)
+		this.material = material;
 };
 
 /**
@@ -4512,7 +4541,8 @@ JSC3D.Mesh.prototype.setMaterial = function(material) {
 	@param {JSC3D.Texture} texture the texture object.
  */
 JSC3D.Mesh.prototype.setTexture = function(texture) {
-	this.texture = texture;
+	if (texture)
+		this.texture = texture;
 };
 
 /**
@@ -4759,7 +4789,7 @@ JSC3D.Mesh.prototype.calcCreasedVertexNormals = function() {
 	if(!this.vertexNormalBuffer || this.vertexNormalBuffer.length < expectedVertNormalBufferLength)
 		this.vertexNormalBuffer = new Array(expectedVertNormalBufferLength);
 	var vnbuf = this.vertexNormalBuffer;
-	for(var i=0; i<vnbuf.length; i++) {
+	for(var i=0, l=vnbuf.length; i<l; i++) {
 		vnbuf[i] = 0;
 	}
 
@@ -4772,27 +4802,30 @@ JSC3D.Mesh.prototype.calcCreasedVertexNormals = function() {
 		In this case, There will be a separate normal for each vertex of each face.
 	*/
 	var threshold = Math.cos(this.creaseAngle * Math.PI / 180);
-	for(var i=0, vindex=0, nindex=0, findex0=0; i<ibuf.length; i++) {
+	var fnx0, fny0, fnz0, faces;
+	var vindex=0, nindex=0, findex0=0;
+	var n, f0, f1, fnx1, fny1, fnz1;
+	for(var i=0,l=ibuf.length; i<l; i++) {
 		vindex = ibuf[i];
 		if(vindex >= 0) {
-			var n = nindex * 3; 
-			var f0 = findex0 * 3;
+			n = nindex * 3; 
+			f0 = findex0 * 3;
 			// add face normal to vertex normal
 			vnbuf[n    ] += fnbuf[f0    ];
 			vnbuf[n + 1] += fnbuf[f0 + 1];
 			vnbuf[n + 2] += fnbuf[f0 + 2];
-			var fnx0 = nfnbuf[f0    ];
-			var fny0 = nfnbuf[f0 + 1];
-			var fnz0 = nfnbuf[f0 + 2];
+			fnx0 = nfnbuf[f0    ];
+			fny0 = nfnbuf[f0 + 1];
+			fnz0 = nfnbuf[f0 + 2];
 			// go through faces around this vertex, accumulating normals
-			var faces = vertTouchedFaces[vindex];
-			for(var j=0; j<faces.length; j++) {
+			faces = vertTouchedFaces[vindex];
+			for(var j=0,m=faces.length; j<m; j++) {
 				var findex1 = faces[j];
 				if(findex0 != findex1) {
-					var f1 = findex1 * 3;
-					var fnx1 = nfnbuf[f1    ];
-					var fny1 = nfnbuf[f1 + 1];
-					var fnz1 = nfnbuf[f1 + 2];
+					f1 = findex1 * 3;
+					fnx1 = nfnbuf[f1    ];
+					fny1 = nfnbuf[f1 + 1];
+					fnz1 = nfnbuf[f1 + 2];
 					// if the angle between normals of the adjacent faces is less than the crease-angle, the 
 					// normal of the other face will be accumulated to the vertex normal of the current face
 					if(fnx0 * fnx1 + fny0 * fny1 + fnz0 * fnz1 > threshold) {
@@ -4929,8 +4962,6 @@ JSC3D.Mesh.prototype.rotate = function(rotation, rotationMode) {
 	if (maxZ < -s) degZ += f; if (maxZ >= s) degZ -= f;
 	this.rotation[0]+=degX;this.rotation[1]+=degY;this.rotation[2]+=degZ; /* Mesh rotate */
 	
-	//if(JSC3D.console) JSC3D.console.logInfo('Mesh rotation: ' + JSON.stringify(this.rotation));
-	
 	/* rotate normals */
 	if (!!degX) normalMat.rotateAboutXAxis(degX);
 	if (!!degY) normalMat.rotateAboutYAxis(degY);
@@ -4961,6 +4992,24 @@ JSC3D.Mesh.prototype.translate = function(translation, translationMode) {
 	
 	/* translate */
 	xformMat.translate(translation[0], translation[1], translation[2]);
+	JSC3D.Math3D.transformVectors(xformMat, this.vertexBuffer, this.vertexBuffer);
+	this.calcAABB();
+	this.compiled = null;
+};
+
+JSC3D.Mesh.prototype.relocate = function(translation, translationMode) {
+	var xformMat = new JSC3D.Matrix3x4;
+
+	var posX = this.translation[0], posY = this.translation[1], posZ = this.translation[2];
+	var tX = translation[0]-posX, tY = translation[1]-posY, tZ = translation[2]-posZ;
+	// TODO: implement translationMode
+	/* store translation */
+	this.translation[0]+=tX;
+	this.translation[1]+=tY;
+	this.translation[2]+=tZ;
+	
+	/* translate */
+	xformMat.translate(tX, tY, tZ);
 	JSC3D.Math3D.transformVectors(xformMat, this.vertexBuffer, this.vertexBuffer);
 	this.calcAABB();
 	this.compiled = null;
@@ -5022,7 +5071,6 @@ JSC3D.Mesh.prototype.scale = function(scaling, scaleMode) {
 	this.compiled = null;
 	
 	var newSize = [meshBox.maxX - meshBox.minX, meshBox.maxY - meshBox.minY, meshBox.maxZ - meshBox.minZ];
-	//if(JSC3D.console) JSC3D.console.logInfo('Mesh resize: ' + JSON.stringify(newSize));
 };
 
 JSC3D.Mesh.prototype.transform = function(rotation, rotationMode, translation, translationMode, scaling, scaleMode) {
@@ -5156,12 +5204,12 @@ JSC3D.Mesh.prototype.resize = function(size, resizeMode) {
 	this.compiled = null;
 	
 	var newSize = [meshBox.maxX - meshBox.minX, meshBox.maxY - meshBox.minY, meshBox.maxZ - meshBox.minZ];
-	//if(JSC3D.console) JSC3D.console.logInfo('Mesh resize: ' + JSON.stringify(newSize));
 }
 
 JSC3D.Mesh.prototype.shiftX = function() {
 	var xformMat = new JSC3D.Matrix3x4;
-	var center = this.aabb.center();
+	//var center = this.aabb.center();
+	var center = this.axis;
 	
 	/* relative to mesh position, not to scene aabb center  */
 	var cX = center[0];
@@ -5175,7 +5223,8 @@ JSC3D.Mesh.prototype.shiftX = function() {
 
 JSC3D.Mesh.prototype.shiftZ = function() {
 	var xformMat = new JSC3D.Matrix3x4;
-	var center = this.aabb.center();
+	//var center = this.aabb.center();
+	var center = this.axis;
 	
 	/* relative to mesh position, not to scene aabb center  */
 	var cZ = center[2];	
@@ -5221,8 +5270,6 @@ JSC3D.Mesh.prototype.flipX = function() {
 	}
 
 	this.rotation[1]+=degY; /* Mesh flipX */
-	
-	//if(JSC3D.console) JSC3D.console.logInfo('Mesh rotation: ' + JSON.stringify(this.rotation));
 	
 	/* rotate normals */ 
 	normalMat.rotateAboutYAxis(rotY);
@@ -5286,8 +5333,6 @@ JSC3D.Mesh.prototype.flipZ = function() {
 	}
 
 	this.rotation[1]+=degY; /* Mesh flipZ */
-	
-	//if(JSC3D.console) JSC3D.console.logInfo('Mesh rotation: ' + JSON.stringify(this.rotation));
 	
 	/* rotate normals */ 
 	normalMat.rotateAboutYAxis(rotY);
@@ -5481,13 +5526,14 @@ JSC3D.Material.prototype.generatePalette = function() {
 	var diffuseR = (this.diffuseColor & 0xff0000) >> 16;
 	var diffuseG = (this.diffuseColor & 0xff00) >> 8;
 	var diffuseB = this.diffuseColor & 0xff;
-
+	
+	var r, g, b;
 	if(this.simulateSpecular) {
 		var i = 0;
 		while(i < 204) {
-			var r = Math.max(ambientR, i * diffuseR / 204);
-			var g = Math.max(ambientG, i * diffuseG / 204);
-			var b = Math.max(ambientB, i * diffuseB / 204);
+			r = Math.max(ambientR, i * diffuseR / 204);
+			g = Math.max(ambientG, i * diffuseG / 204);
+			b = Math.max(ambientB, i * diffuseB / 204);
 			if(r > 255)
 				r = 255;
 			if(g > 255)
@@ -5500,9 +5546,9 @@ JSC3D.Material.prototype.generatePalette = function() {
 
 		// simulate specular high light
 		while(i < 256) {
-			var r = Math.max(ambientR, diffuseR + (i - 204) * (255 - diffuseR) / 82);
-			var g = Math.max(ambientG, diffuseG + (i - 204) * (255 - diffuseG) / 82);
-			var b = Math.max(ambientB, diffuseB + (i - 204) * (255 - diffuseB) / 82);
+			r = Math.max(ambientR, diffuseR + (i - 204) * (255 - diffuseR) / 82);
+			g = Math.max(ambientG, diffuseG + (i - 204) * (255 - diffuseG) / 82);
+			b = Math.max(ambientB, diffuseB + (i - 204) * (255 - diffuseB) / 82);
 			if(r > 255)
 				r = 255;
 			if(g > 255)
@@ -5516,9 +5562,9 @@ JSC3D.Material.prototype.generatePalette = function() {
 	else {
 		var i = 0;
 		while(i < 256) {
-			var r = Math.max(ambientR, i * diffuseR / 256);
-			var g = Math.max(ambientG, i * diffuseG / 256);
-			var b = Math.max(ambientB, i * diffuseB / 256);
+			r = Math.max(ambientR, i * diffuseR / 256);
+			g = Math.max(ambientG, i * diffuseG / 256);
+			b = Math.max(ambientB, i * diffuseB / 256);
 			
 			/* Lighting */
 			var x = i / 256;
@@ -6029,10 +6075,11 @@ JSC3D.Math3D = {
 		@param {Array} xfvecs where to output the transformed vectors.
 	 */
 	transformVectors: function(mat, vecs, xfvecs) {
+		var x, y, z;
 		for(var i=0; i<vecs.length; i+=3) {
-			var x = vecs[i    ];
-			var y = vecs[i + 1];
-			var z = vecs[i + 2];
+			x = vecs[i    ];
+			y = vecs[i + 1];
+			z = vecs[i + 2];
 			xfvecs[i    ] = mat.m00 * x + mat.m01 * y + mat.m02 * z + mat.m03;
 			xfvecs[i + 1] = mat.m10 * x + mat.m11 * y + mat.m12 * z + mat.m13;
 			xfvecs[i + 2] = mat.m20 * x + mat.m21 * y + mat.m22 * z + mat.m23;
@@ -6047,9 +6094,14 @@ JSC3D.Math3D = {
 	 */
 	transformVectorZs: function(mat, vecs, xfveczs) {
 		var num = vecs.length / 3;
-		var i = 0, j = 0
+		var i = 0, j = 0;
+		var x, y, z;
 		while(i < num) {
-			xfveczs[i] = mat.m20 * vecs[j] + mat.m21 * vecs[j + 1] + mat.m22 * vecs[j + 2] + mat.m23;
+			x = vecs[j    ];
+			y = vecs[j + 1];
+			z = vecs[j + 2];
+			xfveczs[i] = mat.m20 * x + mat.m21 * y + mat.m22 * z + mat.m23;
+	
 			i++;
 			j += 3;
 		}
@@ -6062,11 +6114,12 @@ JSC3D.Math3D = {
 	 */
 	normalizeVectors: function(src, dest) {
 		var num = src.length;
+		var x, y, z, len;
 		for(var i=0; i<num; i+=3) {
-			var x = src[i    ];
-			var y = src[i + 1];
-			var z = src[i + 2];
-			var len = Math.sqrt(x * x + y * y + z * z);
+			x = src[i    ];
+			y = src[i + 1];
+			z = src[i + 2];
+			len = Math.sqrt(x * x + y * y + z * z);
 			if(len > 0) {
 				len = 1 / len;
 				x *= len;
@@ -6173,6 +6226,10 @@ JSC3D.PlatformInfo = (function() {
 		version:			'n/a',
 		profile:			'default', /* FPS */
 		isTouchDevice:		(document.createTouch != undefined), 		// detect if it is running on touch device
+		isTouchCapable:		'ontouchstart' in window ||
+							window.DocumentTouch && document instanceof window.DocumentTouch ||
+							navigator.maxTouchPoints > 0 ||
+							window.navigator.msMaxTouchPoints > 0,
 		supportTypedArrays:	(window.Uint32Array != undefined),			// see if Typed Arrays are supported 
 		supportWebGL:		(window.WebGLRenderingContext != undefined)	// see if WebGL context is supported
 	};
