@@ -81,9 +81,6 @@ JSC3D.ObjLoader.prototype.abort = function() {
 	}
 	this.requests = [];
 	this.requestCount = 0;
-	for(var i=0; i<this.textureRequests.length; i++) {
-		this.textureRequests[i].abort();
-	}
 	this.resourceRequestCount = 0; /* scene complete */
 };
 
@@ -182,7 +179,7 @@ JSC3D.ObjLoader.prototype.loadMtlFile = function(scene, urlPath, fileName) {
 				}
 				/* scene complete +++ */
 				for(var textureFileName in textures) 
-					self.textureRequestCount++;
+					self.resourceRequestCount++;
 				/* scene complete --- */
 				for(var textureFileName in textures)
 					self.setupTexture(textures[textureFileName], urlPath + textureFileName);
