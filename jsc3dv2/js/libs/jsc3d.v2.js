@@ -172,6 +172,7 @@ JSC3D.Viewer = function(canvas, parameters) {
 	this.afterupdate = null;
 	this.onscenerotation = null; /* Scene Rotation */
 	this.ontick = null; /* FPS */
+	this.onscenecomplete = null; /* scene complete */
 	this.mouseUsage = 'default';
 	this.isDefaultInputHandlerEnabled = true;
 	this.progressFrame = null;
@@ -1379,7 +1380,6 @@ JSC3D.Viewer.prototype.resize = function() {
 	}
 	
 	if (frameWidth != oldFrameWidth || frameHeight != oldFrameHeight) {
-		
 		this.canvas.width = w;
 		this.canvas.height = h;
 		var ratio = frameWidth / oldFrameWidth;
@@ -1535,6 +1535,13 @@ JSC3D.Viewer.prototype.loadScene = function() {
 		self.update();
 	};
 
+	/* scene complete +++ */
+	loader.onresourcecomplete = function() {
+		if(self.onscenecomplete && (typeof self.onscenecomplete) == 'function')
+			self.onscenecomplete();
+	};
+	/* scene complete --- */
+	
 	this.abortUnfinishedLoadingFn = function() {
 		loader.abort();
 		self.abortUnfinishedLoadingFn = null;
@@ -4022,6 +4029,7 @@ JSC3D.Viewer.prototype.isDefaultInputHandlerEnabled = false;
 JSC3D.Viewer.prototype.isSceneRotationEnabled = false; /* Scene Rotation */
 JSC3D.Viewer.prototype.onscenerotation = null; /* Scene Rotation */
 JSC3D.Viewer.prototype.ontick = null; /* FPS */
+JSC3D.Viewer.prototype.onscenecomplete = null; /* scene complete */
 
 /**
 	@class PickInfo

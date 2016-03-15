@@ -276,6 +276,10 @@ JSC3D.OpenCTMLoader.prototype.parseCTM = function(scene, data) {
 			mesh.setTexture(this);
 			if(self.onresource)
 				self.onresource(this);
+			/* scene complete +++ */
+			if(self.onresourcecomplete)
+				self.onresourcecomplete();
+			/* scene complete --- */
 		});
 		texture.createFromUrl(this.urlPath + ctm.body.uvMaps[0].filename);
 

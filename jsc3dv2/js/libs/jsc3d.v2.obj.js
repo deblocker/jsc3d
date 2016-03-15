@@ -41,6 +41,7 @@ JSC3D.ObjLoader = function(onload, onerror, onprogress, onresource) {
 	this.onresource = (onresource && typeof(onresource) == 'function') ? onresource : null;
 	this.requestCount = 0;
 	this.requests = [];
+	this.resourceRequestCount = 0; /* scene complete */
 };
 
 /**
@@ -67,6 +68,7 @@ JSC3D.ObjLoader.prototype.loadFromUrl = function(urlName) {
 	}
 
 	this.requestCount = 0;
+	this.resourceRequestCount = 0; /* scene complete */
 	this.loadObjFile(urlPath, fileName, queryPart);
 };
 
@@ -79,6 +81,10 @@ JSC3D.ObjLoader.prototype.abort = function() {
 	}
 	this.requests = [];
 	this.requestCount = 0;
+	for(var i=0; i<this.textureRequests.length; i++) {
+		this.textureRequests[i].abort();
+	}
+	this.resourceRequestCount = 0; /* scene complete */
 };
 
 /**
@@ -174,6 +180,10 @@ JSC3D.ObjLoader.prototype.loadMtlFile = function(scene, urlPath, fileName) {
 						}
 					}
 				}
+				/* scene complete +++ */
+				for(var textureFileName in textures) 
+					self.textureRequestCount++;
+				/* scene complete --- */
 				for(var textureFileName in textures)
 					self.setupTexture(textures[textureFileName], urlPath + textureFileName);
 			}
@@ -481,12 +491,17 @@ JSC3D.ObjLoader.prototype.parseMtl = function(data) {
 JSC3D.ObjLoader.prototype.setupTexture = function(meshList, textureUrlName) {
 	var self = this;
 	var texture = new JSC3D.Texture;
+	this.resourceRequestCount++; /* scene complete */
 
 	texture.onready = function() {
 		for(var i=0; i<meshList.length; i++)
 			meshList[i].setTexture(this);
 		if(self.onresource)
 			self.onresource(this);
+		/* scene complete +++ */
+		if(--self.resourceRequestCount == 0)
+			self.onresourcecomplete();
+		/* scene complete --- */
 	};
 
 	texture.createFromUrl(textureUrlName);
@@ -497,3 +512,4 @@ JSC3D.ObjLoader.prototype.onerror = null;
 JSC3D.ObjLoader.prototype.onprogress = null;
 JSC3D.ObjLoader.prototype.onresource = null;
 JSC3D.ObjLoader.prototype.requestCount = 0;
+JSC3D.ObjLoader.prototype.resourceRequestCount = 0; /* scene complete */
